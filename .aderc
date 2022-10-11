@@ -1,0 +1,7 @@
+# Uncomment the following line to enable access to your camera
+# export ADE_DOCKER_RUN_ARGS="--device /dev/video0"
+export ADE_GITLAB=gitlab.com
+export ADE_REGISTRY=registry.gitlab.com
+export ADE_IMAGES="
+  registry.gitlab.com/uh-fs-ai/fs-ai-ade:main
+"
