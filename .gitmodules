@@ -1,0 +1,3 @@
+[submodule "src/eufs_sim"]
+	path = src/eufs_sim
+	url = https://gitlab.com/eufs/eufs_sim.git
