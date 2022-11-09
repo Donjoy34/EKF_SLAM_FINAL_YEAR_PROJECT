@@ -1,16 +1,16 @@
 
-This Repo contains the ROS2 packages for Sensors 
+This Repo contains the ROS2 packages for Sensors  
 
 
 ## Qcar
 
-RPLIDAR A2 : 
+RPLIDAR A2 :  https://github.com/slamtec/rplidar_ros/tree/ros2
 
-Intel realsence D450: 
+Intel realsence D450: https://github.com/IntelRealSense/realsense-ros
 
 
 ## ADS-DV
 
-Zed 2i Camera:
+Zed 2i Camera: https://github.com/stereolabs/zed-ros2-wrapper
 
-Valodyne Vld 16 PUCK:
+Velodyne Vlp 16 PUCK:
