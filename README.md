@@ -16,10 +16,38 @@ git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
 > `git checkout master`
 >
 
+## Prerequisits
+Install colcon
+
+```shell
+$ sudo sh -c 'echo "deb [arch=amd64,arm64] http://repo.ros2.org/ubuntu/main `lsb_release -cs` main" > /etc/apt/sources.list.d/ros2-latest.list'
+$ curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+
+$ sudo apt update
+$ sudo apt install python3-colcon-common-extensions
+```
+
+Clone this repository and eufs_msgs v2.0.0 under the same directory. Then, set the path of this directory as the EUFS_MASTER environment variable.
+
+```shell
+echo 'export EUFS_MASTER=/path/to/the/directory' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Install dependencies through rosdep.
+
+```shell
+sudo apt-get install python3-rosdep
+sudo rosdep init
+rosdep update
+rosdep install --from-paths $EUFS_MASTER --ignore-src -r -y
+```
+
+
 ## Compiling
 
 ```shell
-$ cd [your-workspace]
+$ cd ~/uh-fs-ai
 $ colcon build
 $ . install/setup.bash
 ```
