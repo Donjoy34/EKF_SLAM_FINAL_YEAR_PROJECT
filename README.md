@@ -60,8 +60,16 @@ To launch the simulator
 ros2 launch launch/simulation.launch.py
 ```
 
-To launch the planning & control nodes
+To launch the planning & control nodes (Run in New Terminal)
 
 ```shell
+. install/setup.bash
 ros2 launch launch/plan_con.launch.py
+```
+
+To launch the sensor_fusion node (Run in New Terminal)
+
+```shell
+. install/setup.bash
+ros2 launch launch/launch.py
 ```
