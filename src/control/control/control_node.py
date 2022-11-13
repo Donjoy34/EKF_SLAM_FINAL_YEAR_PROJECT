@@ -1,4 +1,5 @@
 from cmath import sin
+from geometry_msgs.msg import Point
 # from typing import _KT_co
 from eufs_msgs.msg import WaypointArrayStamped, CarState
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -34,6 +35,7 @@ class Control(Node):
         # Create publishers
         self.comand_pub = self.create_publisher(AckermannDriveStamped, "/cmd", 1)
         self.viz_pub = self.create_publisher(Marker, "/control/viz", 1)
+        self.visualization_look_ahead_index = self.create_publisher(Marker, "/control/Index", 1)
 
     def state_callback(self, msg):
         self.speed = msg.twist.twist.linear.x
@@ -76,6 +78,7 @@ class Control(Node):
 
         # self.get_logger().info("---------->  look_ahead_index :")
         # self.get_logger().info(str(look_ahead_index))
+        self.publish_look_ahead_index(look_ahead_index)
 
         return look_ahead_index
 
@@ -177,6 +180,23 @@ class Control(Node):
 
         self.viz_pub.publish(marker)
 
+    def publish_look_ahead_index(self, look_ahead_index):
+        marker = Marker()
+        marker.header.frame_id = "base_footprint"
+        marker.action = Marker.ADD
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.type = Marker.POINTS
+        marker.color.a = 1.0
+        marker.color.r = 0.0
+        marker.color.g = 0.0
+        marker.color.b = 1.0
+        marker.id = 1
+        marker.scale.x = 0.35
+        marker.scale.y = 0.35
+        marker.ns = "look_ahead_index"
+        marker.points.append(Point(x=look_ahead_index.real, y=look_ahead_index.imag))
+
+        self.visualization_look_ahead_index.publish(marker)
 
 
     def convert(self, waypoints, struct = ''):
