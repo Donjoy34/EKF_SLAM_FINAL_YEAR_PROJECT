@@ -70,14 +70,19 @@ class Control(Node):
 
         # self.get_logger().info("---------->  path :")
         # self.get_logger().info(str(path))
-
+    
+        look_ahead_index = [3,0]
+        look_ahead_index = look_ahead_index[0] + 1j * look_ahead_index[1]
+        
         for index in path:
             if index.real > self.look_ahead :
                 look_ahead_index = index
-                break;        
+                break;   
+             
 
-        # self.get_logger().info("---------->  look_ahead_index :")
-        # self.get_logger().info(str(look_ahead_index))
+        self.get_logger().info("---------->  look_ahead_index :")
+        self.get_logger().info(str(look_ahead_index))
+
         self.publish_look_ahead_index(look_ahead_index)
 
         return look_ahead_index
@@ -96,6 +101,7 @@ class Control(Node):
 
         # self.get_logger().info("---------->  steering_angle1 :")
         # self.get_logger().info(str(steering_angle1))
+        
         self.get_logger().info("---------->  steering_angle2 :")
         self.get_logger().info(str(steering_angle))
 
@@ -110,6 +116,8 @@ class Control(Node):
         :param look_ahead_ind:
         :return: speed we want to reach
         """
+        if look_ahead_ind == (3+0j):
+            return 0.0
 
         # self.max_lat_acc
         # target_speed = 
@@ -120,7 +128,8 @@ class Control(Node):
         self.get_logger().info("---------->  target_speed :")
         self.get_logger().info(str(target_speed))
 
-        return target_speed
+        # return target_speed
+        return 0.5
 
     def get_acceleration(self, speed_target):
         """
@@ -130,7 +139,11 @@ class Control(Node):
         :param speed_target: speed we want to achieve
         :return: acceleration command to be sent to the car
         """
-
+        if speed_target == 0.0:
+            return 0.0
+        elif self.speed > 2:
+            return -0.25
+        
         # desired state r(t) =  velocity we want to achieve ( speed_target )
         # current state y(t) =  velocity from localization (self.speed : for now)
         # correction u(t) = acceleration we apply to the car (new_acc)
@@ -143,7 +156,7 @@ class Control(Node):
 
         new_acc = self.safe_speed
 
-        return new_acc
+        return 0.5
 
     def pubish_command(self, acceleration, steering):
         msg = AckermannDriveStamped()

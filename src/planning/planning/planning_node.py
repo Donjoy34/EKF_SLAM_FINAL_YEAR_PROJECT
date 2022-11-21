@@ -1,10 +1,12 @@
 from turtle import distance
-from eufs_msgs.msg import WaypointArrayStamped, Waypoint, ConeArrayWithCovariance, CarState
+from eufs_msgs.msg import WaypointArrayStamped, Waypoint, ConeArrayWithCovariance, CarState, FullState
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker
 from rclpy.node import Node
 import rclpy
 import math
+
+# from sensor_msgs.msg import gps
 
 import numpy as np
 from scipy import interpolate
@@ -17,10 +19,42 @@ class Planner(Node):
 
         # Create subscribers
         self.cones_sub = self.create_subscription(ConeArrayWithCovariance, "/fusion/cones", self.cones_callback, 1)
+        self.car_state_sub = self.create_subscription(CarState, "/ground_truth/state", self.state_callback, 1)
+        # self.car_state_sub = self.create_subscription(FullState, "/gps", self.fullstate_callback, 1)
 
         # Create publishers
         self.track_line_pub = self.create_publisher(WaypointArrayStamped, "/trajectory", 1)
         self.visualization_pub = self.create_publisher(Marker, "/planner/viz", 1)
+        self.car_pose_pub = self.create_publisher(Marker, "/planner/CarPose", 1)
+        self.test_pose_pub = self.create_publisher(Marker, "/planner/TestPose", 1)
+        self.line_strip_pub = self.create_publisher(Marker, "/planner/LineStrip", 1)
+        self.line_list_pub = self.create_publisher(Marker, "/planner/LineList", 1)
+        
+
+    def state_callback(self, msg):
+        self.speed = msg.twist.twist.linear.x
+        pose = msg.pose
+        # self.get_logger().info("#####################----------  msg :----------------->")
+        # self.get_logger().info(str(msg))
+        # self.get_logger().info("#####################----------  pose :----------------->")
+        # self.get_logger().info(str(pose))
+        # self.get_logger().info("#####################----------  pose.position :----------------->")
+        # self.get_logger().info(str(pose.pose.position))
+        position= msg.pose.pose.position
+        position_c = position.x + 1j * position.y
+        # self.publish_car_pose(position_c)
+    
+    def fullstate_callback(self, msg):
+        #self.speed = msg.twist.twist.linear.x
+        pose_x = msg.x_pos
+        pose_y = msg.y_pos
+        # self.get_logger().info("#####################---------- Full State msg :----------------->")
+        # self.get_logger().info(str(msg))
+        
+        position_c = pose_x + 1j * pose_y
+        self.publish_car_pose(position_c)
+
+        # twist_pose = msg.
 
     def cones_callback(self, msg):
         blue_cones = self.convert(msg.blue_cones)
@@ -35,6 +69,7 @@ class Planner(Node):
 
         midpoints = self.find_midpoints(blue_cones, yellow_cones, orange_cones)
         midpoints = self.sort_midpoints(midpoints)
+        
 
         # Convert back to complex
         midpoints_c = np.array([])
@@ -47,6 +82,10 @@ class Planner(Node):
         if len(midpoints_c) == 0:
             return
 
+        # self.publish_path(midpoints_c)
+        # self.publish_visualisation(midpoints_c)
+        # self.publish_line_stip(midpoints_c)
+
         # Here we interpolate the path to artificially increase the number of midpoints so that the controllers
         # have more information to work with you don't need to worry about this step
         try:
@@ -58,6 +97,63 @@ class Planner(Node):
 
         self.publish_path(midpoints_c)
         self.publish_visualisation(midpoints_c)
+        self.publish_line_stip(midpoints_c)
+
+        # test_array=[[1.0,5.0],[3.0,3.0],[-3.0,-3.0]]
+        # for point in test_array:
+        #     position_c = point[0] + 1j * point[1]
+        #     self.publish_test_pose(position_c)
+        
+        # for cones in blue_cones:
+        #     position_c = cones[0] + 1j * cones[1]
+        #     self.publish_test_pose(position_c)
+        
+        # for cones in yellow_cones:
+        #     position_c = cones[0] + 1j * cones[1]
+        #     self.publish_test_pose(position_c)
+
+    def infer_middlepoints_blue_cone(self, blue_cones):
+        # sort the blue points, infer middle points by finding 
+        #the perpendicular bisector between consecutive two blue cones 
+        #and finding the point 3 units(Half of road width) to the right
+
+        self.get_logger().info("#####################---------- ONLY   BLUE CONES   :----------------->")
+        num_cones= len(blue_cones)
+        midpoints=[]
+        for index in range(num_cones-1):
+            x3 = (blue_cones[index][0] + blue_cones[index + 1][0]) / 2
+            y3 = (blue_cones[index][1] + blue_cones[index + 1][1]) / 2
+
+            B = np.array(blue_cones[index][1] - blue_cones[index + 1][1], blue_cones[index][0] - blue_cones[index + 1][0])
+            c = B/np.linalg.norm(B)
+            midpoints.append((x3,y3) + -2 * c)
+
+            # [x4,y4]= (x3,y3) + 3 * c
+
+
+        # self.publish_path(midpoints)
+
+
+        return midpoints
+
+    def infer_middlepoints_yellow_cone(self, yellow_cones):
+        # sort the yellow points, infer middle points by finding 
+        #the perpendicular bisector between consecutive two yellow cones 
+        #and finding the point 3 units(Half of road width) to the left
+
+        self.get_logger().info("#####################---------- ONLY   YELLOW CONES   :----------------->")
+        num_cones= len(yellow_cones)
+        midpoints=[]
+        for index in range(num_cones-1):
+            x3 = (yellow_cones[index][0] + yellow_cones[index + 1][0]) / 2
+            y3 = (yellow_cones[index][1] + yellow_cones[index + 1][1]) / 2
+
+            B = np.array(yellow_cones[index][1] - yellow_cones[index + 1][1], yellow_cones[index][0] - yellow_cones[index + 1][0])
+            c = B/np.linalg.norm(B)
+            midpoints.append((x3,y3) + 2 * c)
+        
+        return midpoints
+   
 
     def find_midpoints(self, blue_cones, yellow_cones, orange_cones):
         """
@@ -68,14 +164,93 @@ class Planner(Node):
         :param orange_cones:
         :return: list of midpoints
         """
+        # self.publish_visualisation(blue_cones)
+        # self.publish_visualisation(yellow_cones)
+        # self.get_logger().info("#####################---------- blue_cones :----------------->")
+        # self.get_logger().info(str(blue_cones))
+        # self.get_logger().info("#####################---------- yellow_cones :----------------->")
+        # self.get_logger().info(str(yellow_cones))
+        self.get_logger().info("#####################---------- orange_cones :----------------->")
+        self.get_logger().info(str(orange_cones))
+        
         if len(blue_cones) <= len(yellow_cones):
             num_cones = len(blue_cones)
         else:
             num_cones = len(yellow_cones)
 
+
+
+        blue_cones = self.sort_list(blue_cones)
+        yellow_cones = self.sort_list(yellow_cones)
+
+   
+
+     
+
+        len_b = len(blue_cones)
+        len_y = len(yellow_cones)
         midpoints = []
-        for cone_pos in range(0,num_cones):
-            midpoints.append([((blue_cones[cone_pos][0] + yellow_cones[cone_pos][0]) / 2 ) , ((blue_cones[cone_pos][1] + yellow_cones[cone_pos][1]) / 2 )])
+        line_list = [] 
+
+        if (len_b>0 and len_y>0):
+            # dummyline=1
+            # if(len_b > len_y):
+            #     if(condition_A):    #Condition_A - check if distance between blue_cones[0] and yellow_cones[0] are 
+            #                 # less than a threshold - can be something like 1.5x road width
+            #         #Calculate normally
+            #     else:
+            #         self.infer_middlepoints_blue_cone()
+            # if(len_y > len_b):
+            #     if(condition_B):    #Condition_B - check if distance between yellow_cones[0] and blue_cones[0] are 
+            #                 # less than a threshold - can be something like 1.5x road width
+            #         #Calculate normally
+            #     else:
+            #         self.infer_middlepoints_yellow_cone()
+
+            # Finding midpoints  ---------METHOD 1-----
+            # b1 ---------> y1
+            # b2 ---------> y2
+            # b3 ---------> y3
+            # b4 ---------> y4
+            
+            for cone_pos in range(0,num_cones):
+                midpoints.append([((blue_cones[cone_pos][0] + yellow_cones[cone_pos][0]) / 2 ) , ((blue_cones[cone_pos][1] + yellow_cones[cone_pos][1]) / 2 )])
+                # Convert back to complex
+                bluecones_c = blue_cones[cone_pos][0] + 1j * blue_cones[cone_pos][1]
+                yellowcones_c = yellow_cones[cone_pos][0] + 1j * yellow_cones[cone_pos][1]
+
+                line_list.append(bluecones_c)
+                line_list.append(yellowcones_c)
+
+                if cone_pos < num_cones-1:
+                    midpoints.append([((blue_cones[cone_pos + 1][0] + yellow_cones[cone_pos][0]) / 2 ) , ((blue_cones[cone_pos + 1 ][1] + yellow_cones[cone_pos][1]) / 2 )])
+                    nextbluecones_c = blue_cones[cone_pos +1 ][0] + 1j * blue_cones[cone_pos+1][1]
+                    line_list.append(yellowcones_c)
+                    line_list.append(nextbluecones_c)
+                # self.publish_line_list([blue_cones[cone_pos][0],yellow_cones[cone_pos][0]],[blue_cones[cone_pos][1],yellow_cones[cone_pos][1]])
+       
+                
+                # if orange_cones:
+                #     orangecones_c = orange_cones[cone_pos][0] + 1j * orange_cones[cone_pos][1]      
+                
+
+                # if orange_cones:
+                #     line_list.append(orangecones_c)
+            
+            self.publish_line_list(line_list)
+
+            # Finding midpoints  --------- METHOD 2 -----
+
+            # for cone_pos in range(0,num_cones):
+
+
+            # return midpoints
+        elif (len_b > 0):
+            midpoints = self.infer_middlepoints_blue_cone(blue_cones)
+
+        elif (len_y > 0):
+            midpoints = self.infer_middlepoints_yellow_cone(yellow_cones)
+            
 
         return midpoints
 
@@ -86,6 +261,10 @@ class Planner(Node):
         :param midpoints:
         :return: sorted midpoints
         """
+        # self.publish_car_pose(self.car_state_sub)
+        # self.get_logger().info("self.car_state_sub:----------------->")
+        # self.get_logger().info(str(self.car_state_sub))
+
         cone_dict = {}
         for cones in range(0,len(midpoints)):
             cone_dict.update({math.sqrt(((midpoints[cones][0]- 0) ** 2) + (((midpoints[cones][1]- 0) ** 2))) : midpoints[cones]})
@@ -95,6 +274,8 @@ class Planner(Node):
         sorted_midpoints = list(sorted_dict.values())
 
         return sorted_midpoints
+
+
 
     def publish_path(self, midpoints):
         waypoint_array = WaypointArrayStamped()
@@ -126,6 +307,92 @@ class Planner(Node):
             marker.points.append(Point(x=midpoint.real, y=midpoint.imag))
 
         self.visualization_pub.publish(marker)
+    
+    def publish_car_pose(self, car_pose):
+        marker = Marker()
+        marker.header.frame_id = "base_footprint"
+        marker.action = Marker.ADD
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.type = Marker.POINTS
+        marker.color.a = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.id = 1
+        marker.scale.x = 0.35
+        marker.scale.y = 0.35
+        marker.ns = "car_pose"
+        marker.points.append(Point(x=car_pose.real, y=car_pose.imag))
+
+        self.car_pose_pub .publish(marker)
+
+    def publish_test_pose(self, test_pose):
+        marker = Marker()
+        marker.header.frame_id = "base_footprint"
+        marker.action = Marker.ADD
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.type = Marker.POINTS
+        marker.color.a = 1.0
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 1.0
+        marker.id = 2
+        marker.scale.x = 0.35
+        marker.scale.y = 0.35
+        marker.ns = "test_pose"
+        # marker.points.append(Point(x=test_pose[0], y=test_pose[1]))
+        marker.points.append(Point(x=test_pose.real, y=test_pose.imag))
+
+        self.test_pose_pub .publish(marker)
+
+    def publish_line_stip(self, line_stip):
+        marker = Marker()
+        marker.header.frame_id = "base_footprint"
+        marker.action = Marker.ADD
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.type = Marker.LINE_STRIP
+        marker.color.a = 1.0
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 1.0
+        marker.id = 3
+        marker.scale.x = 0.1
+        marker.scale.y = 0.1
+        marker.ns = "line_stip"
+        for line_stip in line_stip:
+            # marker.points.append(Point(x=line_stip[0], y=line_stip[1]))
+            marker.points.append(Point(x=line_stip.real, y=line_stip.imag))
+
+        self.line_strip_pub .publish(marker)
+
+    def publish_line_list(self, line_list):
+        marker = Marker()
+        marker.header.frame_id = "base_footprint"
+        marker.action = Marker.ADD
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.type = Marker.LINE_LIST
+        marker.color.a = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.id = 4
+        marker.scale.x = 0.2
+        marker.scale.y = 0.2
+        marker.ns = "line_list"
+        for line_list in line_list:
+            # marker.points.append(Point(x=line_stip[0], y=line_stip[1]))
+            marker.points.append(Point(x=line_list.real, y=line_list.imag))
+
+        self.line_list_pub .publish(marker)
+    
+    def sort_list(self, points):
+        cone_dict = {}
+        for cones in range(0,len(points)):
+            cone_dict.update({math.sqrt(((points[cones][0]- 0) ** 2) + (((points[cones][1]- 0) ** 2))) : points[cones]})
+
+        sorted_dict = {k : cone_dict[k] for k in sorted(cone_dict)}
+        sorted_points = list(sorted_dict.values())
+        return sorted_points
 
     def convert(self, cones):
         """
