@@ -11,7 +11,7 @@ git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
 
 > NOTE: if you're using Galactic & Ubuntu 20.04 please remember to checkout eufs_sim repo to master
 > 
-> `cd us-fs-ai/src/eufs_sim`
+> `cd uh-fs-ai/src/eufs_sim`
 > 
 > `git checkout master`
 >
