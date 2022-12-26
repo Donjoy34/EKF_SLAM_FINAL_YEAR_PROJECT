@@ -14,7 +14,10 @@ git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
 > `cd uh-fs-ai/src/eufs_sim`
 > 
 > `git checkout master`
+
+> NOTE 2: If you are working on any development brach other than main please remember to use the below command line.
 >
+> `git submodule update --init --recursive`
 
 ## Prerequisits
 Install colcon
@@ -26,7 +29,13 @@ $ curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo 
 $ sudo apt update
 $ sudo apt install python3-colcon-common-extensions
 ```
-
+ Intel Realsense SDK Installation
+ 
+ ```shell
+ chmod 777 bin/Signed_Image_UVC_5_14_0_0.bin
+ . bin/Signed_Image_UVC_5_14_0_0.bin
+ ```
+ 
 Clone this repository and eufs_msgs v2.0.0 under the same directory. Then, set the path of this directory as the EUFS_MASTER environment variable.
 
 ```shell
