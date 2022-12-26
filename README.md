@@ -31,10 +31,7 @@ $ sudo apt install python3-colcon-common-extensions
 ```
  Intel Realsense SDK Installation
  
- ```shell
- chmod 777 bin/Signed_Image_UVC_5_14_0_0.bin
- . bin/Signed_Image_UVC_5_14_0_0.bin
- ```
+> https://github.com/IntelRealSense/realsense-ros#option-2-build-from-sourcehttps://github.com/IntelRealSense/realsense-ros#option-2-build-from-source
  
 Clone this repository and eufs_msgs v2.0.0 under the same directory. Then, set the path of this directory as the EUFS_MASTER environment variable.
 
