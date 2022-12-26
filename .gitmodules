@@ -8,3 +8,6 @@
 [submodule "src/sensors/intel_realsense"]
 	path = src/sensors/intel_realsense
 	url = https://github.com/IntelRealSense/realsense-ros.git
+[submodule "src/sensors/zed_2i"]
+	path = src/sensors/zed_2i
+	url = https://github.com/stereolabs/zed-ros2-wrapper.git
