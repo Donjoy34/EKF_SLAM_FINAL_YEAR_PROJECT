@@ -14,3 +14,7 @@ Intel realsence D450: https://github.com/IntelRealSense/realsense-ros
 Zed 2i Camera: https://github.com/stereolabs/zed-ros2-wrapper
 
 Velodyne Vlp 16 PUCK:
+
+## References
+
+Qcar : https://www.quanser.com/products/qcar/
