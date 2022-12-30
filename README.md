@@ -1,5 +1,24 @@
 This Repository Maintains the FS-AI Developments for 2023 compatition at Silverstone.
 
+## Prerequisits
+**Install colcon**
+
+```shell
+$ sudo sh -c 'echo "deb [arch=amd64,arm64] http://repo.ros2.org/ubuntu/main `lsb_release -cs` main" > /etc/apt/sources.list.d/ros2-latest.list'
+$ curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+
+$ sudo apt update
+$ sudo apt install python3-colcon-common-extensions
+```
+**Install Intel Realsense SDK**
+ 
+>Follow the instructions in the following link: 
+>https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md
+>
+
+**Zed-2i Ros2 Prerequisites**
+>make sure the prerequisites are met as per the following link: https://github.com/stereolabs/zed-ros2-wrapper
+>
 
 ## clone the repo
 
@@ -15,19 +34,20 @@ git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
 > 
 > `git checkout master`
 >
+> `cd uh-fs-ai`
+>
 
-## Prerequisits
-Install colcon
+> NOTE 2: If you are working on any development brach other than main please remember to use the below command line.
+>
+> `git submodule update --init --recursive`
 
-```shell
-$ sudo sh -c 'echo "deb [arch=amd64,arm64] http://repo.ros2.org/ubuntu/main `lsb_release -cs` main" > /etc/apt/sources.list.d/ros2-latest.list'
-$ curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
 
-$ sudo apt update
-$ sudo apt install python3-colcon-common-extensions
-```
+ 
 
-Clone this repository and eufs_msgs v2.0.0 under the same directory. Then, set the path of this directory as the EUFS_MASTER environment variable.
+**Setup EUFS_MASTER Variable** 
+
+execute `pwd` command from your `uh-fs-ai` directory and replace `/path/to/the/directory` in the below command with output of `pwd` command to set the path of this directory as the EUFS_MASTER environment variable
+
 
 ```shell
 echo 'export EUFS_MASTER=/path/to/the/directory' >> ~/.bashrc
