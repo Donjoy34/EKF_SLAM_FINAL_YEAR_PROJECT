@@ -25,7 +25,9 @@ git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
 
 **Setup EUFS_MASTER Variable** 
 
-execute `pwd` command from your `uh-fs-ai` directory and replace `/path/to/the/directory` in the below command with output of `pwd` command to set the path of this directory as the EUFS_MASTER environment variable `Example : echo 'export EUFS_MASTER=/home/nihad/uh-fs-ai' >> ~/.bashrc`
+execute `pwd` command from your `uh-fs-ai` directory and replace `/path/to/the/directory` in the below command with output of `pwd` command to set the path of this directory as the EUFS_MASTER environment variable 
+
+`Example : echo 'export EUFS_MASTER=/home/nihad/uh-fs-ai' >> ~/.bashrc`
 
 
 ```shell
