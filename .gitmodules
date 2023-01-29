@@ -11,3 +11,6 @@
 [submodule "src/sensors/zed_2i"]
 	path = src/sensors/zed_2i
 	url = https://github.com/stereolabs/zed-ros2-wrapper.git
+[submodule "src/eufs_rviz_plugins"]
+	path = src/eufs_rviz_plugins
+	url = https://gitlab.com/eufs/eufs_rviz_plugins.git
