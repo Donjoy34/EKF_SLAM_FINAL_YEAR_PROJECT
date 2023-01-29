@@ -10,15 +10,6 @@ $ curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo 
 $ sudo apt update
 $ sudo apt install python3-colcon-common-extensions
 ```
-**Install Intel Realsense SDK**
- 
->Follow the instructions in the following link: 
->https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md
->
-
-**Zed-2i Ros2 Prerequisites**
->make sure the prerequisites are met as per the following link: https://github.com/stereolabs/zed-ros2-wrapper
->
 
 ## clone the repo
 
