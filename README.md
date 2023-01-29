@@ -1,6 +1,10 @@
 This Repository Maintains the FS-AI Developments for 2023 compatition at Silverstone.
 
 ## Prerequisites
+
+ - Install Ubuntu 20.04 LTS
+ - Install [ros-galactic-desktop](http://docs.ros.org/en/galactic/Installation/Ubuntu-Install-Debians.html)
+
 **Install colcon**
 
 ```shell
@@ -19,25 +23,9 @@ Setup ssh-key following the instructions [here](https://gitlab.com/uh-fs-ai/uh-f
 git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
 ```
 
-> NOTE: if you're using Galactic & Ubuntu 20.04 please remember to checkout eufs_sim repo to master
-> 
-> `cd uh-fs-ai/src/eufs_sim`
-> 
-> `git checkout master`
->
-> `cd uh-fs-ai`
->
-
-> NOTE 2: If you are working on any development brach other than main please remember to use the below command line.
->
-> `git submodule update --init --recursive`
-
-
- 
-
 **Setup EUFS_MASTER Variable** 
 
-execute `pwd` command from your `uh-fs-ai` directory and replace `/path/to/the/directory` in the below command with output of `pwd` command to set the path of this directory as the EUFS_MASTER environment variable
+execute `pwd` command from your `uh-fs-ai` directory and replace `/path/to/the/directory` in the below command with output of `pwd` command to set the path of this directory as the EUFS_MASTER environment variable `Example : echo 'export EUFS_MASTER=/home/nihad/uh-fs-ai' >> ~/.bashrc`
 
 
 ```shell
