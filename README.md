@@ -63,7 +63,9 @@ $ . install/setup.bash
 To launch the simulator 
 
 ```shell
-ros2 launch launch/simulation.launch.py
+ros2 launch eufs_launcher eufs_launcher.launch.py
+
+ros2 launch launch/simulation.launch.py (Updates Pending)
 ```
 
 To launch the planning & control nodes (Run in New Terminal)
