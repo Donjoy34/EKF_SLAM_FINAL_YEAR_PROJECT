@@ -1,23 +1,11 @@
 This Repository Maintains the FS-AI Developments for 2023 compatition at Silverstone.
 
+## Prerequisites
 
-## clone the repo
+ - Install Ubuntu 20.04 LTS
+ - Install [ros-galactic-desktop](http://docs.ros.org/en/galactic/Installation/Ubuntu-Install-Debians.html)
 
-Setup ssh-key following the instructions [here](https://gitlab.com/uh-fs-ai/uh-fs-ai/-/wikis/Git-Commands) to enable you to authenticates to the GitLab server without using username and password each time.
-
-```shell
-git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
-```
-
-> NOTE: if you're using Galactic & Ubuntu 20.04 please remember to checkout eufs_sim repo to master
-> 
-> `cd us-fs-ai/src/eufs_sim`
-> 
-> `git checkout master`
->
-
-## Prerequisits
-Install colcon
+**Install colcon**
 
 ```shell
 $ sudo sh -c 'echo "deb [arch=amd64,arm64] http://repo.ros2.org/ubuntu/main `lsb_release -cs` main" > /etc/apt/sources.list.d/ros2-latest.list'
@@ -27,7 +15,20 @@ $ sudo apt update
 $ sudo apt install python3-colcon-common-extensions
 ```
 
-Clone this repository and eufs_msgs v2.0.0 under the same directory. Then, set the path of this directory as the EUFS_MASTER environment variable.
+## clone the repo
+
+Setup ssh-key following the instructions [here](https://gitlab.com/uh-fs-ai/uh-fs-ai/-/wikis/Git-Commands) to enable you to authenticates to the GitLab server without using username and password each time.
+
+```shell
+git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
+```
+
+**Setup EUFS_MASTER Variable** 
+
+execute `pwd` command from your `uh-fs-ai` directory and replace `/path/to/the/directory` in the below command with output of `pwd` command to set the path of this directory as the EUFS_MASTER environment variable 
+
+`Example : echo 'export EUFS_MASTER=/home/nihad/uh-fs-ai' >> ~/.bashrc`
+
 
 ```shell
 echo 'export EUFS_MASTER=/path/to/the/directory' >> ~/.bashrc
@@ -41,6 +42,11 @@ sudo apt-get install python3-rosdep
 sudo rosdep init
 rosdep update
 rosdep install --from-paths $EUFS_MASTER --ignore-src -r -y
+```
+Few additional dependencies : 
+
+```shell
+sudo apt install ros-galactic-gazebo-dev ros-galactic-gazebo-msgs ros-galactic-gazebo-plugins ros-galactic-gazebo-ros ros-galactic-gazebo-ros-pkgs ros-galactic-ackermann-msgs ros-galactic-xacro ros-${ROS_DISTRO}-joint-state-publisher python3-tk
 ```
 
 
