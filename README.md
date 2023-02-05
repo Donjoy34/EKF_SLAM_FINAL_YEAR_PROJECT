@@ -46,7 +46,7 @@ rosdep install --from-paths $EUFS_MASTER --ignore-src -r -y
 Few additional dependencies : 
 
 ```shell
-sudo apt install ros-galactic-gazebo-dev ros-galactic-gazebo-msgs ros-galactic-gazebo-plugins ros-galactic-gazebo-ros ros-galactic-gazebo-ros-pkgs ros-galactic-ackermann-msgs ros-galactic-xacro ros-${ROS_DISTRO}-joint-state-publisher python3-tk
+sudo apt install ros-${ROS_DISTRO}-gazebo-dev ros-${ROS_DISTRO}-gazebo-msgs ros-${ROS_DISTRO}-gazebo-plugins ros-${ROS_DISTRO}-gazebo-ros ros-${ROS_DISTRO}-gazebo-ros-pkgs ros-${ROS_DISTRO}-ackermann-msgs ros-${ROS_DISTRO}-xacro ros-${ROS_DISTRO}-joint-state-publisher python3-tk ros-${ROS_DISTRO}-plotjuggler-ros
 ```
 
 
