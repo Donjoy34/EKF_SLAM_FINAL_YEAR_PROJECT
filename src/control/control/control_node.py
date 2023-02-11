@@ -62,29 +62,31 @@ class Control(Node):
 
     def get_look_ahead_index(self, path):
         """
-        IMPLEMENT YOURSELF
-
         :param path: array of complex numbers
         :return: index of waypoint closest to look ahead distance
         """
 
         # self.get_logger().info("---------->  path :")
         # self.get_logger().info(str(path))
-
+    
+        look_ahead_index = [3,0]
+        look_ahead_index = look_ahead_index[0] + 1j * look_ahead_index[1]
+        
         for index in path:
             if index.real > self.look_ahead :
                 look_ahead_index = index
-                break;        
+                break;   
+             
 
-        # self.get_logger().info("---------->  look_ahead_index :")
-        # self.get_logger().info(str(look_ahead_index))
+        self.get_logger().info("---------->  look_ahead_index :")
+        self.get_logger().info(str(look_ahead_index))
+
         self.publish_look_ahead_index(look_ahead_index)
 
         return look_ahead_index
 
     def get_steering(self, path, look_ahead_ind):
         """
-        IMPLEMENT YOURSELF
         note: the wheelbase of the car L is saved in the self.L variable
         :param path: array of complex numbers
         :param look_ahead_ind:
@@ -96,6 +98,7 @@ class Control(Node):
 
         # self.get_logger().info("---------->  steering_angle1 :")
         # self.get_logger().info(str(steering_angle1))
+        
         self.get_logger().info("---------->  steering_angle2 :")
         self.get_logger().info(str(steering_angle))
 
@@ -103,13 +106,14 @@ class Control(Node):
 
     def get_speed_target(self, path, look_ahead_ind):
         """
-        IMPLEMENT YOURSELF
         note: You might want to use the max_lat_acc variable to limit lateral acceleration
         and max_speed to limit the maximum speed
         :param path: array of complex numbers
         :param look_ahead_ind:
         :return: speed we want to reach
         """
+        if look_ahead_ind == (3+0j):
+            return 0.0
 
         # self.max_lat_acc
         # target_speed = 
@@ -120,17 +124,21 @@ class Control(Node):
         self.get_logger().info("---------->  target_speed :")
         self.get_logger().info(str(target_speed))
 
-        return target_speed
+        # return target_speed
+        return 0.5
 
     def get_acceleration(self, speed_target):
         """
-        IMPLEMENT YOURSELF
         Note: the current speed of the car is saved in self.speed
         the PID gains are saved in self.K_p, self.K_i, self.K_d
         :param speed_target: speed we want to achieve
         :return: acceleration command to be sent to the car
         """
-
+        if speed_target == 0.0:
+            return 0.0
+        elif self.speed > 2:
+            return -0.25
+        
         # desired state r(t) =  velocity we want to achieve ( speed_target )
         # current state y(t) =  velocity from localization (self.speed : for now)
         # correction u(t) = acceleration we apply to the car (new_acc)
@@ -143,7 +151,7 @@ class Control(Node):
 
         new_acc = self.safe_speed
 
-        return new_acc
+        return 0.5
 
     def pubish_command(self, acceleration, steering):
         msg = AckermannDriveStamped()
