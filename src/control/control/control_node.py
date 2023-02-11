@@ -62,8 +62,6 @@ class Control(Node):
 
     def get_look_ahead_index(self, path):
         """
-        IMPLEMENT YOURSELF
-
         :param path: array of complex numbers
         :return: index of waypoint closest to look ahead distance
         """
@@ -89,7 +87,6 @@ class Control(Node):
 
     def get_steering(self, path, look_ahead_ind):
         """
-        IMPLEMENT YOURSELF
         note: the wheelbase of the car L is saved in the self.L variable
         :param path: array of complex numbers
         :param look_ahead_ind:
@@ -109,7 +106,6 @@ class Control(Node):
 
     def get_speed_target(self, path, look_ahead_ind):
         """
-        IMPLEMENT YOURSELF
         note: You might want to use the max_lat_acc variable to limit lateral acceleration
         and max_speed to limit the maximum speed
         :param path: array of complex numbers
@@ -133,7 +129,6 @@ class Control(Node):
 
     def get_acceleration(self, speed_target):
         """
-        IMPLEMENT YOURSELF
         Note: the current speed of the car is saved in self.speed
         the PID gains are saved in self.K_p, self.K_i, self.K_d
         :param speed_target: speed we want to achieve

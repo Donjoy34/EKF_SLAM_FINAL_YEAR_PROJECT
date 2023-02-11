@@ -38,15 +38,6 @@ class Planner(Node):
         big_orange_cones = self.convert(msg.big_orange_cones)
         uncolored_cones = self.convert(msg.unknown_color_cones)
 
-        # self.get_logger().info("#####################---------- blue_cones :----------------->")
-        # self.get_logger().info(str(blue_cones))
-        # self.get_logger().info("#####################---------- yellow_cones :----------------->")
-        # self.get_logger().info(str(yellow_cones))
-        # self.get_logger().info("#####################---------- orange_cones :----------------->")
-        # self.get_logger().info(str(orange_cones))
-        # self.get_logger().info("#####################---------- big_orange_cones :----------------->")
-        # self.get_logger().info(str(big_orange_cones))
-
         # add uncolored lidar cones to the appropriate sides
         close_uncolored = uncolored_cones[np.abs(uncolored_cones) < 4]
         close_orange_cones = orange_cones[np.abs(orange_cones) < 10]
@@ -70,10 +61,6 @@ class Planner(Node):
 
         if len(midpoints_c) == 0:
             return
-
-        # self.publish_path(midpoints_c)
-        # self.publish_visualisation(midpoints_c)
-        # self.publish_line_stip(midpoints_c)
 
         # Here we interpolate the path to artificially increase the number of midpoints so that the controllers
         # have more information to work with you don't need to worry about this step
@@ -125,16 +112,16 @@ class Planner(Node):
         
         return midpoints
    
-
+    
     def find_midpoints(self, blue_cones, yellow_cones, orange_cones, big_orange_cones):
         """
-        IMPLEMENT YOURSELF
         Find the midpoints along the track
         :param blue_cones: cone positions
         :param yellow_cones:
         :param orange_cones:
         :return: list of midpoints
         """
+
         
         if len(blue_cones) <= len(yellow_cones):
             num_cones = len(blue_cones)
@@ -152,31 +139,8 @@ class Planner(Node):
         line_list = [] 
 
         if (len_b>0 and len_y>0):
-            # dummyline=1
-            # if(len_b > len_y):
-            #     if(condition_A):    #Condition_A - check if distance between blue_cones[0] and yellow_cones[0] are 
-            #                 # less than a threshold - can be something like 1.5x road width
-            #         #Calculate normally
-            #     else:
-            #         self.infer_middlepoints_blue_cone()
-            # if(len_y > len_b):
-            #     if(condition_B):    #Condition_B - check if distance between yellow_cones[0] and blue_cones[0] are 
-            #                 # less than a threshold - can be something like 1.5x road width
-            #         #Calculate normally
-            #     else:
-            #         self.infer_middlepoints_yellow_cone()
-
-            # Finding midpoints  ---------METHOD 1-----
-            # b1 ---------> y1
-            # b2 ---------> y2
-            # b3 ---------> y3
-            # b4 ---------> y4
             
             for cone_pos in range(0,num_cones):
-
-                # try to exclude lines with size greatertahn 8
-                # if (math.sqrt(((blue_cones[cone_pos][0]- yellow_cones[cone_pos][0]) ** 2) + (((blue_cones[cone_pos][1]- yellow_cones[cone_pos][1])) ** 2))) < 8:
-
 
                 midpoints.append([((blue_cones[cone_pos][0] + yellow_cones[cone_pos][0]) / 2 ) , ((blue_cones[cone_pos][1] + yellow_cones[cone_pos][1]) / 2 )])
                 # Convert back to complex
@@ -194,11 +158,6 @@ class Planner(Node):
 
             self.publish_line_list(line_list)
 
-            # Finding midpoints  --------- METHOD 2 -----
-
-            # for cone_pos in range(0,num_cones):
-
-
             # return midpoints
         elif (len_b > 0):
             midpoints = self.infer_middlepoints_blue_cone(blue_cones)
@@ -209,9 +168,9 @@ class Planner(Node):
 
         return midpoints
 
+    
     def sort_midpoints(self, midpoints):
         """
-        IMPLEMENT YOURSELF
         Sort the midpoints to so that each consecutive midpoints is further from the car along the path
         :param midpoints:
         :return: sorted midpoints
@@ -291,7 +250,6 @@ class Planner(Node):
         marker.scale.x = 0.35
         marker.scale.y = 0.35
         marker.ns = "test_pose"
-        # marker.points.append(Point(x=test_pose[0], y=test_pose[1]))
         marker.points.append(Point(x=test_pose.real, y=test_pose.imag))
 
         self.test_pose_pub .publish(marker)
@@ -311,7 +269,6 @@ class Planner(Node):
         marker.scale.y = 0.1
         marker.ns = "line_stip"
         for line_stip in line_stip:
-            # marker.points.append(Point(x=line_stip[0], y=line_stip[1]))
             marker.points.append(Point(x=line_stip.real, y=line_stip.imag))
 
         self.line_strip_pub .publish(marker)
@@ -331,7 +288,6 @@ class Planner(Node):
         marker.scale.y = 0.2
         marker.ns = "line_list"
         for line_list in line_list:
-            # marker.points.append(Point(x=line_stip[0], y=line_stip[1]))
             marker.points.append(Point(x=line_list.real, y=line_list.imag))
 
         self.line_list_pub .publish(marker)
