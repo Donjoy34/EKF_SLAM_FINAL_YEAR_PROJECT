@@ -19,6 +19,9 @@ class SensorFusion(Node):
                                      Subscriber(self, Imu, 'imu', qos_profile=qos_profile_sensor_data)],
                                      10, 1).registerCallback(self.callback)
 
+        # # Create subscribers
+        # self.cones_sub = self.create_subscription(Imu, "/imu/data", self.imu_callback, 1)
+
         # Initialise velocity publisher
         self.publisher = self.create_publisher(TwistWithCovarianceStamped, 'velocity', 1)
 
@@ -54,9 +57,22 @@ class SensorFusion(Node):
         return
 
     def callback(self, wheel_data: TwistWithCovarianceStamped, imu_data: Imu):
+        self.get_logger().info("Imu data ------------------------------------------------>    :")
+        self.get_logger().info(str(wheel_data))
 
         self.get_logger().info('Entered callback')
-        
+
+        self.publisher .publish(wheel_data)
+
+
+
+        # Imu data publisher command :
+        # ros2 topic pub /imu sensor_msgs/Imu '{header: {stamp: {sec: 732, nanosec: 55000000}, frame_id: "imu_frame"}, linear_acceleration: {x: 1.0, y: 2.0, z: 3.0}, angular_velocity: {x: 4.0, y: 5.0, z: 6.0}}'
+
+        # wheel encoder data publisher command:
+        # ros2 topic pub /ros_can/twist geometry_msgs/msg/TwistWithCovarianceStamped '{header: {stamp: {sec: 732, nanosec: 55000000}, frame_id: "base_link"}, twist: {twist: {linear: {x: 1.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.5}}, covariance: [0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1,0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1,0.0, 0.0, 0.0, 0.1]}}'
+
+       
 
 
 def main():
