@@ -7,6 +7,7 @@ from numpy import array, eye
 from numpy.linalg import inv
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import TwistWithCovarianceStamped
+from nav_msgs.msg import Odometry
 
 class SensorFusion(Node):
 
@@ -15,20 +16,20 @@ class SensorFusion(Node):
         super().__init__('sensor_fusion')
 
         # Initialise subscribers and time synchronizer
-        ApproximateTimeSynchronizer([Subscriber(self, TwistWithCovarianceStamped, 'ros_can/twist'),
-                                     Subscriber(self, Imu, 'imu', qos_profile=qos_profile_sensor_data)],
+        ApproximateTimeSynchronizer([Subscriber(self, Odometry, '/ground_truth/odom'),
+                                     Subscriber(self, Imu, 'imu/data', qos_profile=qos_profile_sensor_data)],
                                      10, 1).registerCallback(self.callback)
 
         # # Create subscribers
         # self.cones_sub = self.create_subscription(Imu, "/imu/data", self.imu_callback, 1)
 
         # Initialise velocity publisher
-        self.publisher = self.create_publisher(TwistWithCovarianceStamped, 'velocity', 1)
+        self.publisher = self.create_publisher(Odometry, 'velocity', 1)
 
         self.previous_time = self.get_clock().now()
 
         # Initial state vector [velocity, acceleration]
-        self.state = array([0.0, 0.0])
+        self.state = array([0.1, 0.1])
 
         # Covariance matrix for the uncertainty in the initial state
         self.covariance = array([[0.0, 0.0],
@@ -56,13 +57,53 @@ class SensorFusion(Node):
     def imu_noise_covariance(self, imu_data: Imu):
         return
 
-    def callback(self, wheel_data: TwistWithCovarianceStamped, imu_data: Imu):
-        self.get_logger().info("Imu data ------------------------------------------------>    :")
-        self.get_logger().info(str(wheel_data))
+    def callback(self, wheel_data: Odometry, imu_data: Imu):
+        self.get_logger().info("Imu data : imu_data.linear_acceleration.x ------------------------------------------------>    :")
+        self.get_logger().info(str(imu_data.linear_acceleration.x))
 
-        self.get_logger().info('Entered callback')
 
-        self.publisher .publish(wheel_data)
+        # ---------------- Test contents to be removed : From here --------------------->
+
+        time_delta = 0.1
+        linear_acceleration = imu_data.linear_acceleration.x
+
+        
+        self.get_logger().info("self.previous_time    :")
+        self.get_logger().info(str(self.previous_time))
+
+        self.get_logger().info("Current_time :   :")
+        self.get_logger().info(str(self.get_clock().now()))
+
+        # self.state
+
+        self.get_logger().info("self.state:   :")
+        self.get_logger().info(str(self.state))
+
+        new_state=[0.0, 0.0]
+
+
+
+        new_state[0]=1
+        new_state[1]=2
+
+        self.get_logger().info("new_state:   :")
+        self.get_logger().info(str(new_state))
+
+
+        # self.state.append(new_state)
+
+        # numpy.append(self.state,new_state)
+
+        # self.get_logger().info("Updated state:   :")
+        # self.get_logger().info(str(self.state))
+
+        # <-------------------------- Untill here  <-------------------------
+
+        # self.get_logger().info('Entered callback')
+
+        self.publisher.publish(wheel_data)
+
+
 
 
 
