@@ -1,6 +1,7 @@
-from rclpy import init, spin, shutdown
+import rclpy
+# from rclpy import init, spin, shutdown
 from rclpy.node import Node
-from rclpy.time import Duration
+from rclpy.time import Duration, Time
 from rclpy.qos import qos_profile_sensor_data
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 from numpy import array, eye
@@ -11,9 +12,9 @@ from nav_msgs.msg import Odometry
 
 class SensorFusion(Node):
 
-    def __init__(self):
+    def __init__(self, name):
 
-        super().__init__('sensor_fusion')
+        super().__init__(name)
 
         # Initialise subscribers and time synchronizer
         ApproximateTimeSynchronizer([Subscriber(self, Odometry, '/ground_truth/odom'),
@@ -29,7 +30,7 @@ class SensorFusion(Node):
         self.previous_time = self.get_clock().now()
 
         # Initial state vector [velocity, acceleration]
-        self.state = array([0.1, 0.1])
+        self.state = array([0.0, 0.0])
 
         # Covariance matrix for the uncertainty in the initial state
         self.covariance = array([[0.0, 0.0],
@@ -59,35 +60,65 @@ class SensorFusion(Node):
 
     def callback(self, wheel_data: Odometry, imu_data: Imu):
         self.get_logger().info("Imu data : imu_data.linear_acceleration.x ------------------------------------------------>    :")
-        self.get_logger().info(str(imu_data.linear_acceleration.x))
+        # self.get_logger().info(str(imu_data.linear_acceleration.x))
 
 
         # ---------------- Test contents to be removed : From here --------------------->
 
-        time_delta = 0.1
+        time_delta = 2
+        current_time = self.get_clock().now()
+        new_state=[0.0, 0.0]
         linear_acceleration = imu_data.linear_acceleration.x
 
-        
-        self.get_logger().info("self.previous_time    :")
+        # # Convert Time to TimeMsg
+        # current_time_msg = self.previous_time.to_msg()
+
+        # # Add 2 seconds to TimeMsg
+        # current_time_msg.sec += time_delta
+
+        # # Create a new Time variable with the added seconds
+        # new_time = Time.from_msg(current_time_msg)
+
+        new_time = Time.nanoseconds_to_time(self.previous_time.nanoseconds + 2e9)
+
+
+
+        self.get_logger().info("previous_time:   :")
         self.get_logger().info(str(self.previous_time))
 
-        self.get_logger().info("Current_time :   :")
-        self.get_logger().info(str(self.get_clock().now()))
+        self.get_logger().info("new_time:   :")
+        self.get_logger().info(str(new_time))
+
+        self.get_logger().info("current_time:   :")
+        self.get_logger().info(str(current_time))
+
+        # self.get_logger().info("self.state:   :")
+        # self.get_logger().info(str(self.state))
+
+        # if (self.previous_time + (time_delta * (10 ^ 9)) == current_time):
+        if new_time == current_time:
+            new_state[0]= self.state[0] + ( linear_acceleration * time_delta )  # Velocity
+            new_state[1]= linear_acceleration                                   # Acceleration
+
+            self.state = new_state
+
+            self.get_logger().info("UPDATED STATE :   :")
+            self.get_logger().info(str(self.state))
+
+
+        
+
+        
+        # self.get_logger().info("self.previous_time    :")
+        # self.get_logger().info(str(self.previous_time))
+
+        # self.get_logger().info("Current_time :   :")
+        # self.get_logger().info(str(self.get_clock().now()))
 
         # self.state
 
-        self.get_logger().info("self.state:   :")
-        self.get_logger().info(str(self.state))
-
-        new_state=[0.0, 0.0]
-
-
-
-        new_state[0]=1
-        new_state[1]=2
-
-        self.get_logger().info("new_state:   :")
-        self.get_logger().info(str(new_state))
+        # self.get_logger().info("new_state:   :")
+        # self.get_logger().info(str(new_state))
 
 
         # self.state.append(new_state)
@@ -117,9 +148,16 @@ class SensorFusion(Node):
 
 
 def main():
-    init()
-    spin(SensorFusion())
-    shutdown()
+    # init()
+    # spin(SensorFusion())
+    # shutdown()
+    rclpy.init(args=None)
+    node = SensorFusion("SensorFusion")
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
