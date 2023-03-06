@@ -11,6 +11,8 @@ from numpy.linalg import inv
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import TwistWithCovarianceStamped
 from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Twist
+from eufs_msgs.msg import CanState
 
 
 class SensorFusion(Node):
@@ -23,16 +25,22 @@ class SensorFusion(Node):
         ApproximateTimeSynchronizer([Subscriber(self, Odometry, '/ground_truth/odom'),
                                      Subscriber(self, Imu, 'imu/data', qos_profile=qos_profile_sensor_data)],
                                      10, 1).registerCallback(self.callback)
+        
+        self.can_state_sub = self.create_subscription(CanState, "/ros_can/state", self.can_state_callback, 1)
 
         # # Create subscribers
         # self.cones_sub = self.create_subscription(Imu, "/imu/data", self.imu_callback, 1)
 
         # Initialise velocity publisher
-        self.publisher = self.create_publisher(Odometry, 'velocity', 1)
+        # self.publisher = self.create_publisher(Odometry, 'velocity', 1)
+
+        self.ami_state = 0
+
+        self.publisher = self.create_publisher(Twist, 'velocity', 1)
 
 
-        self.Odom_publisher = self.create_publisher(Odometry, 'Odom_Velocity', 1)
-        self.Imu_publisher = self.create_publisher(Imu, 'Imu_Velocity', 1)
+        # self.Odom_publisher = self.create_publisher(Odometry, 'Odom_Velocity', 1)
+        # self.Imu_publisher = self.create_publisher(Imu, 'Imu_Velocity', 1)
 
         
 
@@ -51,6 +59,24 @@ class SensorFusion(Node):
 
         self.get_logger().info('Initialised sensor fusion node')
            
+    def can_state_callback(self, msg):
+        # self.as_state = self.convert(msg.as_state)
+        # self.ami_state = self.convert(msg.ami_state)
+        # msg.canstate.ami_state
+
+
+        if msg.ami_state == 10:
+            self.state = array([0.0, 0.0])
+        # self.as_state = msg.as_state
+        self.ami_state = msg.ami_state
+
+        # self.get_logger().info("---------->  as_state :")
+        # self.get_logger().info(str(self.as_state))
+
+        # self.get_logger().info("---------->  ami_state :")
+        # self.get_logger().info(str(self.ami_state))
+
+        return 0
 
     def state_transition_matrix(self, dt):
         return
@@ -68,12 +94,15 @@ class SensorFusion(Node):
         return
 
     def callback(self, wheel_data: Odometry, imu_data: Imu):
+
+        # self.get_logger().info('Entered callback')
+
         # self.get_logger().info("Imu data : imu_data.linear_acceleration.x ------------------------------------------------>    :")
         # self.get_logger().info(str(imu_data.linear_acceleration.x))
 
         # ---------------- Test contents to be removed : From here --------------------->
-
-        time_delta = 2
+        # TODO put you calculations here
+        time_delta = 0.05
         current_time = self.get_clock().now()
         new_state=[0.0, 0.0]
         linear_acceleration = imu_data.linear_acceleration.x
@@ -100,7 +129,7 @@ class SensorFusion(Node):
 
             self.previous_time = new_time
 
-            self.get_logger().info("UPDATED STATE :   :")
+            self.get_logger().info("UPDATED STATE :   ----------------------:")
             self.get_logger().info(str(self.state))
 
         # self.get_logger().info("self.previous_time    :")
@@ -126,12 +155,23 @@ class SensorFusion(Node):
 
         # self.get_logger().info('Entered callback')
 
-        self.publisher.publish(wheel_data)
+        
 
-        imu_data.linear_acceleration.y = self.state[0]
+        velocity_prediction = Twist()
+        # TODO fill in the relevant twist message fields here
+        # imu_data.linear_acceleration.y = self.state[0]
+        velocity_prediction.linear.x = self.state[0]
 
-        self.Odom_publisher.publish(wheel_data)
-        self.Imu_publisher.publish(imu_data)
+        # self.get_logger().info("velocity_prediction :   :")
+        # self.get_logger().info(str(velocity_prediction))
+
+        self.publisher.publish(velocity_prediction)
+
+
+        # self.publisher.publish(wheel_data)
+        # self.Odom_publisher.publish(wheel_data)
+        # self.Imu_publisher.publish(imu_data)
+
 
         # Imu data publisher command :
         # ros2 topic pub /imu sensor_msgs/Imu '{header: {stamp: {sec: 732, nanosec: 55000000}, frame_id: "imu_frame"}, linear_acceleration: {x: 1.0, y: 2.0, z: 3.0}, angular_velocity: {x: 4.0, y: 5.0, z: 6.0}}'
