@@ -1,0 +1,19 @@
+<library path="angus_depth_image_transport">
+  <class
+    name="image_transport/angusDepth_pub"
+    type="angus_depth_image_transport::AngusDepthPublisher"
+    base_class_type="image_transport::PublisherPlugin">
+    <description>
+      This plugin publishes a compressed depth images using PNG compression.
+    </description>
+  </class>
+
+  <class
+    name="image_transport/angusDepth_sub"
+    type="angus_depth_image_transport::AngusDepthSubscriber"
+    base_class_type="image_transport::SubscriberPlugin">
+    <description>
+      This plugin decodes a compressed depth images.
+    </description>
+  </class>
+</library>
