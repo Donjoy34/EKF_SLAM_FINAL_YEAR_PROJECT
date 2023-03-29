@@ -15,3 +15,7 @@
 	path = src/perception/vision_opencv
 	url = https://github.com/ros-perception/vision_opencv.git
 	branch = galactic
+[submodule "src/perception/image_transport_plugins"]
+	path = src/perception/image_transport_plugins
+	url = https://github.com/ros-perception/image_transport_plugins.git
+	branch = foxy-devel
