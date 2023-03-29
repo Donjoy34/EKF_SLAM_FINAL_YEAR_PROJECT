@@ -11,3 +11,7 @@
 	path = src/perception/image_common
 	url = https://github.com/ros-perception/image_common.git
 	branch = galactic
+[submodule "src/perception/vision_opencv"]
+	path = src/perception/vision_opencv
+	url = https://github.com/ros-perception/vision_opencv.git
+	branch = galactic
