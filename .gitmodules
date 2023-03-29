@@ -7,10 +7,6 @@
 [submodule "src/eufs_rviz_plugins"]
 	path = src/eufs_rviz_plugins
 	url = https://gitlab.com/eufs/eufs_rviz_plugins.git
-[submodule "src/perception/image_common"]
-	path = src/perception/image_common
-	url = https://github.com/ros-perception/image_common.git
-	branch = galactic
 [submodule "src/perception/image_transport_plugins"]
 	path = src/perception/image_transport_plugins
 	url = https://github.com/ros-perception/image_transport_plugins.git
