@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 import sys
 import cv2
-from cv2 import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
