@@ -8,6 +8,7 @@
 #include <rclcpp/logging.hpp>
 #include <string>
 #include <vector>
+#include "rcutils/logging.h"
 
 #include "angus_depth_image_transport/compression_common.hpp"
 
@@ -90,7 +91,8 @@ sensor_msgs::msg::CompressedImage::SharedPtr encodeCompressedDepthImage(
     int png_level) {
   // Get ROS logger
   auto logger = rclcpp::get_logger("angus_depth_image_transport");
-  logger.set_level(rclcpp::Logger::Level::Debug);
+  //logger.set_level(rclcpp::Logger::Level::Debug);
+  rcutils_logging_set_logger_level(logger.get_name(), RCUTILS_LOG_SEVERITY_DEBUG);
 
   // Compressed image message
   sensor_msgs::msg::CompressedImage::SharedPtr compressed(new sensor_msgs::msg::CompressedImage());
