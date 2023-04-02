@@ -54,7 +54,7 @@ sudo apt install ros-${ROS_DISTRO}-gazebo-dev ros-${ROS_DISTRO}-gazebo-msgs ros-
 
 ```shell
 $ cd ~/uh-fs-ai
-$ colcon build --symlink-install
+$ colcon build --symlink-install --parallel-workers $(nproc)
 $ . install/setup.bash
 ```
 
