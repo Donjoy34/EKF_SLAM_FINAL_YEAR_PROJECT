@@ -19,14 +19,14 @@ class DepthViewer(Node):
         self.left_sub_ = Subscriber(
             self,
             Image,
-            '/camera/left/image_rect_color',
+            '/zed2i/zed_node/left/image_rect_color',
         )
 
         # Subscribe to the right rectified image
         self.right_sub_ = Subscriber(
             self,
             Image,
-            '/camera/right/image_rect_color',
+            '/zed2i/zed_node/right/image_rect_color',
         )
 
         # Create the approximate time synchroniser to sync the subscribers
