@@ -55,7 +55,7 @@ sudo apt install ros-${ROS_DISTRO}-gazebo-dev ros-${ROS_DISTRO}-gazebo-msgs ros-
 ```shell
 $ cd ~/uh-fs-ai
 $ colcon build --symlink-install --parallel-workers $(nproc)
-$ . install/setup.bash
+$ source install/setup.bash
 ```
 
 ## Running
@@ -71,13 +71,13 @@ ros2 launch launch/simulation.launch.py (Updates Pending)
 To launch the planning & control nodes (Run in New Terminal)
 
 ```shell
-. install/setup.bash
+source install/setup.bash
 ros2 launch launch/plan_con.launch.py
 ```
 
 To launch the sensor_fusion node (Run in New Terminal)
 
 ```shell
-. install/setup.bash
+source install/setup.bash
 ros2 launch launch/launch.py
 ```
