@@ -17,10 +17,10 @@ $ sudo apt install python3-colcon-common-extensions
 
 ## clone the repo
 
-Setup ssh-key following the instructions [here](https://gitlab.com/uh-fs-ai/uh-fs-ai/-/wikis/Git-Commands) to enable you to authenticates to the GitLab server without using username and password each time.
+Setup ssh-key following the instructions [here](https://gitlab.com/uhra/uh-fs-ai/-/wikis/Git-Commands) to enable you to authenticates to the GitLab server without using username and password each time.
 
 ```shell
-git clone --recurse-submodules -j8 git@gitlab.com:uh-fs-ai/uh-fs-ai.git
+git clone --recurse-submodules -j8 git@gitlab.com:uhra/uh-fs-ai.git
 ```
 
 **Setup EUFS_MASTER Variable** 
@@ -54,8 +54,8 @@ sudo apt install ros-${ROS_DISTRO}-gazebo-dev ros-${ROS_DISTRO}-gazebo-msgs ros-
 
 ```shell
 $ cd ~/uh-fs-ai
-$ colcon build
-$ . install/setup.bash
+$ colcon build --symlink-install --parallel-workers $(nproc)
+$ source install/setup.bash
 ```
 
 ## Running
@@ -71,13 +71,13 @@ ros2 launch launch/simulation.launch.py (Updates Pending)
 To launch the planning & control nodes (Run in New Terminal)
 
 ```shell
-. install/setup.bash
+source install/setup.bash
 ros2 launch launch/plan_con.launch.py
 ```
 
 To launch the sensor_fusion node (Run in New Terminal)
 
 ```shell
-. install/setup.bash
+source install/setup.bash
 ros2 launch launch/launch.py
 ```
