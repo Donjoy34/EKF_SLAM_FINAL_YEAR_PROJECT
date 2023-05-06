@@ -16,3 +16,6 @@
 [submodule "src/control"]
 	path = src/control
 	url = https://gitlab.com/uh4662410/uhra/fs-ai-control.git
+[submodule "src/mapping"]
+	path = src/mapping
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-mapping.git
