@@ -19,9 +19,6 @@
 [submodule "src/mapping"]
 	path = src/mapping
 	url = git@gitlab.com:uh4662410/uhra/fs-ai-mapping.git
-[submodule "src/perception"]
-	path = src/perception
-	url = git@gitlab.com:uh4662410/uhra/fs-ai-perception.git
 [submodule "src/sensors"]
 	path = src/sensors
 	url = git@gitlab.com:uh4662410/uhra/fs-ai-sensors.git
