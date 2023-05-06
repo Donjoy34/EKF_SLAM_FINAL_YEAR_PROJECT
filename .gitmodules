@@ -17,3 +17,6 @@
 [submodule "src/planning"]
 	path = src/planning
 	url = https://gitlab.com/uh4662410/uhra/fs-ai-planning.git
+[submodule "src/control"]
+	path = src/control
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-control.git
