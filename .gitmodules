@@ -11,3 +11,6 @@
 	path = src/perception/image_transport_plugins
 	url = https://github.com/ros-perception/image_transport_plugins.git
 	branch = foxy-devel
+[submodule "src/localization"]
+	path = src/localization
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-localization.git
