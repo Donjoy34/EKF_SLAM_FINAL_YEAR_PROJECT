@@ -22,3 +22,6 @@
 [submodule "src/perception"]
 	path = src/perception
 	url = https://gitlab.com/uh4662410/uhra/fs-ai-perception.git
+[submodule "src/sensors"]
+	path = src/sensors
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-sensors.git
