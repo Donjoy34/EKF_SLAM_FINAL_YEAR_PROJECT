@@ -23,3 +23,7 @@
 	path = src/sensors
 	url = git@gitlab.com:uh4662410/uhra/fs-ai-sensors.git
 	branch = main
+[submodule "src/perception"]
+	path = src/perception
+	url = git@gitlab.com:uh4662410/uhra/fs-ai-perception.git
+	branch = main
