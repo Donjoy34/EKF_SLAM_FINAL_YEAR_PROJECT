@@ -7,7 +7,21 @@
 [submodule "src/eufs_rviz_plugins"]
 	path = src/eufs_rviz_plugins
 	url = https://gitlab.com/eufs/eufs_rviz_plugins.git
-[submodule "src/perception/image_transport_plugins"]
-	path = src/perception/image_transport_plugins
-	url = https://github.com/ros-perception/image_transport_plugins.git
-	branch = foxy-devel
+[submodule "src/localization"]
+	path = src/localization
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-localization.git
+[submodule "src/planning"]
+	path = src/planning
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-planning.git
+[submodule "src/control"]
+	path = src/control
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-control.git
+[submodule "src/mapping"]
+	path = src/mapping
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-mapping.git
+[submodule "src/perception"]
+	path = src/perception
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-perception.git
+[submodule "src/sensors"]
+	path = src/sensors
+	url = https://gitlab.com/uh4662410/uhra/fs-ai-sensors.git
