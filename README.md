@@ -17,7 +17,7 @@ $ sudo apt install python3-colcon-common-extensions
 
 ## clone the repo
 
-Setup ssh-key following the instructions [here](https://gitlab.com/uhra/uh-fs-ai/-/wikis/Git-Commands) to enable you to authenticates to the GitLab server without using username and password each time.
+Setup ssh-key following the instructions [here](https://gitlab.com/uh4662410/uhra/training/herts-autonomous/-/wikis/ssh-key-setup-and-configure-git) to enable you to authenticates to the GitLab server without using username and password each time.
 
 ```shell
 git clone --recurse-submodules -j8 git@gitlab.com:uh4662410/uhra/uh-fs-ai.git
