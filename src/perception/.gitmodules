@@ -1,4 +1,0 @@
-[submodule "image_transport_plugins"]
-	path = image_transport_plugins
-	url = https://github.com/ros-perception/image_transport_plugins.git
-	branch = foxy-devel
