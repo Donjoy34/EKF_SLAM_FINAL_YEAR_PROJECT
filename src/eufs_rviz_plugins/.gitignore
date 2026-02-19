@@ -1,0 +1,10 @@
+build
+install
+log
+.vscode
+.DS_Store
+.directory
+.idea
+cmake-build-debug
+__pycache__
+
