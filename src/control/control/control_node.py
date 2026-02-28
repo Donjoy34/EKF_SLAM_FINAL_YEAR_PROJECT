@@ -1,321 +1,299 @@
-from geometry_msgs.msg import Point
-# from typing import _KT_co
-from eufs_msgs.msg import WaypointArrayStamped, CarState
+from eufs_msgs.msg import WaypointArrayStamped, CanState, ConeArrayWithCovariance, WheelSpeeds, CarState
 from ackermann_msgs.msg import AckermannDriveStamped
-from visualization_msgs.msg import Marker, MarkerArray
+from visualization_msgs.msg import Marker
 import rclpy
 from rclpy.node import Node
 import math
+import numpy as np
+from std_msgs.msg import Int16
+from std_msgs.msg import Bool
+
+
+
+class PIDController:
+    def __init__(self, kp, ki, kd, output_min=0.0, output_max=1.0):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self._prev_error = 0.0
+        self._integral = 0.0
+        self.output_min = output_min
+        self.output_max = output_max
+
+
+    def reset(self):
+        self._prev_error = 0.0
+        self._integral = 0.0
+
+    def update(self, error, dt):
+        # Proportional
+        p = self.kp * error
+        # Integral
+        self._integral += error * dt
+        i = self.ki * self._integral
+        # Derivative
+        d = self.kd * (error - self._prev_error) / dt if dt > 0.0 else 0.0
+        self._prev_error = error
+
+        raw = p + i + d
+        return max(self.output_min, min(self.output_max, raw))
 
 class Control(Node):
-    def __init__(self, name):
-        super().__init__(name)
-        self.current_speed = 0
-        self.error_buffer = [0]
-        self.period = 0.04      # the time between updates to the path
+    def __init__(self):
+        super().__init__('pure_pursuit')
 
-        # Declare ROS parameters
-        self.look_ahead = self.declare_parameter("look_ahead", 3.0).value
-        self.L = self.declare_parameter("L", 1.5).value
-        self.K_p = self.declare_parameter("K_p", 1.0).value
-        self.K_i = self.declare_parameter("K_i", 1.0).value
-        self.K_d = self.declare_parameter("K_d", 1.0).value
-        self.steering_gain = self.declare_parameter("steering_gain", 1.1).value
-        self.max_steering = self.declare_parameter("max_steering", 0.5).value
-        self.min_turn_speed = self.declare_parameter("min_turn_speed", 0.8).value
-        self.turn_slow_angle = self.declare_parameter("turn_slow_angle", 0.35).value
-        self.max_turn_angle = self.declare_parameter("max_turn_angle", 0.9).value
-        self.turn_memory_hold_sec = self.declare_parameter("turn_memory_hold_sec", 1.0).value
-        self.turn_memory_min_angle = self.declare_parameter("turn_memory_min_angle", 0.25).value
-        self.turn_memory_blend = self.declare_parameter("turn_memory_blend", 0.35).value
-        self.turn_memory_speed = self.declare_parameter("turn_memory_speed", 0.9).value
-        self.turn_memory_waypoint_min = self.declare_parameter("turn_memory_waypoint_min", 6).value
-        self.turn_memory_waypoint_max = self.declare_parameter("turn_memory_waypoint_max", 7).value
-        self.blind_recovery_hold_sec = self.declare_parameter("blind_recovery_hold_sec", 1.2).value
-        self.blind_recovery_speed = self.declare_parameter("blind_recovery_speed", 0.8).value
-        self.blind_recovery_min_steer = self.declare_parameter("blind_recovery_min_steer", 0.18).value
-        self.max_lat_acc = self.declare_parameter("max_lat_acc", 5.0).value
-        self.safe_speed = self.declare_parameter("safe_speed", 1.5).value
-        self.max_speed = self.declare_parameter("max_speed", 4.5).value
-        self.buffer_len = self.declare_parameter("buffer_len", 30).value
+        # Time-keeping for dt
+        self.prev_time = self.get_clock().now().nanoseconds * 1e-9
 
-        # Create subscribers
-        self.path_sub = self.create_subscription(WaypointArrayStamped, "/trajectory", self.path_callback, 1)
-        self.car_state_sub = self.create_subscription(CarState, "/ground_truth/state", self.state_callback, 1)
+        self.stop_triggered = False
+        self.steer_rad = 0.0
+        self.steer_change_cmd = 0.0
+        self.ws_ami_state = 0
+        self.ws_as_state = 0
+        self.ws_can_steering = 0.0
 
-        # Create publishers
-        self.command_pub = self.create_publisher(AckermannDriveStamped, "/cmd", 1)
-        self.viz_pub = self.create_publisher(Marker, "/control/viz", 1)
-        self.visualization_look_ahead_index = self.create_publisher(Marker, "/control/Index", 1)
+        # Parameters
+        self.declare_parameter("static_lookahead_idx", 6)
+        self.declare_parameter("min_speed", 0.5)
+        self.declare_parameter("max_speed", 1.0)
+        self.declare_parameter("Kp_acc", 0.00)
+        self.declare_parameter("Ki_acc", 0.00)
+        self.declare_parameter("Kd_acc", 0.00)
+        # ±60° steering limit, back off at ±59°
+        self.declare_parameter("steer_limit_deg", 60.0)
+        self.declare_parameter("steer_cap_deg",   59.0)
 
-        self.acc_previous_error = 0
-        self.acc_integral = 0
-        self.turn_memory_sign = 0.0
-        self.turn_memory_strength = 0.0
-        self.turn_memory_until_ns = 0
-        self.memory_mode_active = False
-        self.last_valid_steering = 0.0
-        self.last_path_seen_ns = 0
+        self.min_speed  = self.get_parameter("min_speed").value
+        self.max_speed  = self.get_parameter("max_speed").value
+        self._steer_lim = self.get_parameter("steer_limit_deg").value
+        self._steer_cap = self.get_parameter("steer_cap_deg").value
 
-    def state_callback(self, msg):
-        self.current_speed = msg.twist.twist.linear.x
+        self.mission_completed_pub = self.create_publisher(Bool,"/ros_can/mission_completed",1)
+        self.driving_flag_pub = self.create_publisher(Bool,"/state_machine/driving_flag",1)
 
-    def path_callback(self, msg):
-        path = self.convert(msg, "np")  # if you remove the "np" parameter the path will be a 2d array [[x1,y1], ...]
-        now_ns = self.get_clock().now().nanoseconds
 
-        if len(path) == 0:
-            if self.should_use_blind_recovery(now_ns):
-                recovery_steering = self.last_valid_steering
-                if abs(recovery_steering) < self.blind_recovery_min_steer and self.turn_memory_sign != 0.0:
-                    recovery_steering = self.turn_memory_sign * self.blind_recovery_min_steer
+        # PID for steering‐based accel command
+        Kp = self.get_parameter("Kp_acc").value
+        Ki = self.get_parameter("Ki_acc").value
+        Kd = self.get_parameter("Kd_acc").value
+        self.steer_pid = PIDController(Kp, Ki, Kd,
+                                       output_min=0.0, output_max=1.0)
 
-                recovery_steering = max(-self.max_steering, min(self.max_steering, recovery_steering))
-                speed_target = self.blind_recovery_speed
-                acceleration_cmd = self.get_acceleration(speed_target)
-                self.memory_mode_active = True
-                self.publish_command(acceleration_cmd, recovery_steering, speed_target)
-                self.publish_visualisation(acceleration_cmd, recovery_steering)
-            else:
-                self.memory_mode_active = False
+        # ROS interfaces
+        self.create_subscription(WaypointArrayStamped, "/trajectory", self.path_callback, 1)
+        #self.create_subscription(CarState,            "/ground_truth/state", self.state_callback, 1)
+        #Create subscribers
+        self.create_subscription(ConeArrayWithCovariance, "/cones", self.cones_callback, 1)
+
+        #------------------------------------------------------------------
+
+        self.car_state_sub = self.create_subscription(Int16, "/planner/ConSig", self.consig_callback, 1)
+        self.car_state_sub1 = self.create_subscription(CanState, "/ros_can/state", self.can_state_callback, 1)
+        self.car_state_sub2 = self.create_subscription(WheelSpeeds, "/ros_can/wheel_speeds", self.wheel_speed_callback, 1)
+
+
+
+
+
+        self.cmd_pub       = self.create_publisher(AckermannDriveStamped, "/cmd",        1)
+        self.viz_pub       = self.create_publisher(Marker,                  "/control/viz",   1)
+        self.index_viz_pub = self.create_publisher(Marker,                  "/control/Index", 1)
+
+        self.speed = 0.0
+
+
+    def state_callback(self, msg: CarState):
+        self.speed = msg.twist.twist.linear.x
+
+    def path_callback(self, msg: WaypointArrayStamped):
+        # dt for PID
+        now = self.get_clock().now().nanoseconds * 1e-9
+        dt  = max(1e-6, now - self.prev_time)
+        self.prev_time = now
+
+        # Extract [x,y]
+        wps = [[wp.position.x, wp.position.y] for wp in msg.waypoints]
+        if not wps:
             return
 
-        self.last_path_seen_ns = now_ns
+        # Static look‐ahead waypoint
+        idx = self.get_parameter("static_lookahead_idx").value
+        look_wp = wps[idx] if idx < len(wps) else wps[-1]
 
-        # Index of the waypoint to the look ahead distance
-        look_ahead_index = self.get_look_ahead_index(path)
+        # Compute raw steering angle (deg & rad)
+        raw_deg   = math.degrees(math.atan2(look_wp[1], look_wp[0]))
+        abs_deg   = abs(raw_deg)
 
-        # Steering control
-        steering_cmd = self.get_steering(path, look_ahead_index)
-        self.update_turn_memory(look_ahead_index)
-        waypoint_count = len(path)
-        memory_eligible = self.turn_memory_waypoint_min <= waypoint_count <= self.turn_memory_waypoint_max
-        memory_steering = self.get_turn_memory_steering(memory_eligible)
-        if abs(memory_steering) > 1e-3:
-            steering_cmd = steering_cmd * (1.0 - self.turn_memory_blend) + memory_steering * self.turn_memory_blend
-            steering_cmd = max(-self.max_steering, min(self.max_steering, steering_cmd))
+        # Enforce ±steer_limit: if exceeded, find first wp with |angle|≈steer_cap
+        if abs_deg > self._steer_lim:
+            for wp in wps:
+                deg_i = abs(math.degrees(math.atan2(wp[1], wp[0])))
+                if deg_i >= self._steer_cap:
+                    raw_deg = math.copysign(self._steer_cap, raw_deg)
+                    break
 
-        self.last_valid_steering = steering_cmd
+        self.steer_rad = math.radians(raw_deg)
 
-        # Speed control
-        speed_target = self.get_speed_target(path, look_ahead_index)
+        # PID on steering magnitude (target 0°) → pid_out∈[0,1]
+        pid_out = self.steer_pid.update(abs(raw_deg), dt)
 
-        # PID control for acceleration
-        acceleration_cmd = self.get_acceleration(speed_target)
+        # Map pid_out to accel in [–2, +1]: 0→+1, 1→–2
+        accel_cmd = 1.0 - 3.0 * pid_out
+        accel_cmd = max(-2.0, min(1.0, accel_cmd))
 
-
-        self.get_logger().info(f"speed: {self.current_speed}, steering: {steering_cmd}, speed: {speed_target}, acc: {acceleration_cmd}", throttle_duration_sec=.3)
-
-        # Publish commands
-        self.publish_command(acceleration_cmd, steering_cmd, speed_target)
-        self.publish_visualisation(acceleration_cmd, steering_cmd)
-
-    def get_look_ahead_index(self, path):
-        """
-        :param path: array of complex numbers
-        :return: index of waypoint closest to look ahead distance
-        """
-
-        # self.get_logger().info("---------->  path :", throttle_duration_sec=.3)
-        # self.get_logger().info(str(path), throttle_duration_sec=.3)
-        desired_lookahead_index = 2
-        look_ahead_index = 1 + 0j
-
-        # for index in path:
-        #     if index.real > self.look_ahead :
-        #         look_ahead_index = index
-        #         break;   
-        if len(path) == 0:
-            return look_ahead_index
-        forward_points = [p for p in path if p.real > 0.0]
-        if not forward_points:
-            self.publish_look_ahead_index(path[-1])
-            return path[-1]
-
-        first_forward = forward_points[0]
-        first_forward_angle = abs(math.atan2(first_forward.imag, max(first_forward.real, 0.1)))
-
-        if first_forward_angle > self.turn_slow_angle:
-            desired_lookahead_index = 0
-
-        if len(forward_points) > desired_lookahead_index:
-            selected = forward_points[desired_lookahead_index]
-            self.publish_look_ahead_index(selected)
-            return selected
-
-        self.publish_look_ahead_index(forward_points[-1])
-        return forward_points[-1]
-
-
-    def get_steering(self, path, look_ahead_ind):
-        """
-        note: the wheelbase of the car L is saved in the self.L variable
-        :param path: array of complex numbers
-        :param look_ahead_ind:
-        :return: steering angle to be sent to the car
-        """
-        desired_angle = math.atan2(look_ahead_ind.imag, max(look_ahead_ind.real, 0.1))
-        desired_angle *= self.steering_gain
-        desired_angle = max(-self.max_steering, min(self.max_steering, desired_angle))
-        self.get_logger().info(f"steering: {desired_angle}")
-
-        return desired_angle
-
-    
-        # kp = 4.5
-        # ki = 1.5
-        # kd = 1.5
-        # error = np.angle(look_ahead_ind)   # +ve angle towards left and -ve steering angle towards right
-        # self.acc_integral = error
-        # derivative = error - self.acc_previous_error
-        # self.acc_previous_error = error
-
-        # desired_angle = kp * error + ki * self.acc_integral + kd * derivative
-        # self.get_logger().info(f"steering: {desired_angle}")
-
-        # return desired_angle
-
-    def get_speed_target(self, path, look_ahead_ind):
-        """
-        note: You might want to use the max_lat_acc variable to limit lateral acceleration
-        and max_speed to limit the maximum speed
-        :param path: array of complex numbers
-        :param look_ahead_ind:
-        :return: speed we want to reach
-        """
-        turn_angle = abs(math.atan2(look_ahead_ind.imag, max(look_ahead_ind.real, 0.1)))
-
-        if turn_angle <= self.turn_slow_angle:
-            target_speed = self.safe_speed
-        else:
-            ratio = min(1.0, (turn_angle - self.turn_slow_angle) / max(1e-3, self.max_turn_angle - self.turn_slow_angle))
-            target_speed = self.safe_speed - ratio * (self.safe_speed - self.min_turn_speed)
-
-        target_speed = max(self.min_turn_speed, min(target_speed, self.max_speed))
-
-        if self.memory_mode_active:
-            target_speed = min(target_speed, self.turn_memory_speed)
-
-        return target_speed
-
-    def update_turn_memory(self, look_ahead_ind):
-        turn_angle = math.atan2(look_ahead_ind.imag, max(look_ahead_ind.real, 0.1))
-        if abs(turn_angle) < self.turn_memory_min_angle:
+        # Enforce speed window [min, max]
+        if self.speed < self.min_speed:
+            accel_cmd = +2.0
+        elif self.speed > self.max_speed:
+            accel_cmd = -1.0
+        if self.stop_triggered:
+            self.get_logger().info(" Stopping in progress: Ignoring path control")
+            self.publish_command(-1.0, 0.0)  # Maintain braking
             return
 
-        self.turn_memory_sign = 1.0 if turn_angle > 0.0 else -1.0
-        self.turn_memory_strength = min(self.max_steering, abs(turn_angle) * self.steering_gain)
-        now_ns = self.get_clock().now().nanoseconds
-        self.turn_memory_until_ns = now_ns + int(self.turn_memory_hold_sec * 1e9)
+        # Publish drive & viz
+        self.publish_command(accel_cmd, float(self.steer_rad))
+        self.publish_visualisation(accel_cmd, raw_deg,self.speed)
+        self.publish_static_lookahead_marker(look_wp)
+    def can_state_callback(self, msg):
+        # self.get_logger().info("---------->  self.as_state:" + str(msg.as_state))
+        # self.get_logger().info("---------->  self.ami_state:" + str(msg.ami_state))
+        self.get_logger().info(
+            " ami_state :" + str(msg.ami_state) + " self.state :" + str(msg.as_state),
+            throttle_duration_sec=1.0,
+        )
+        self.ws_ami_state = msg.ami_state
+        self.ws_as_state = msg.as_state
+    def wheel_speed_callback(self, msg):
+        self.ws_can_steering= msg.steering
 
-    def get_turn_memory_steering(self, memory_eligible):
-        if not memory_eligible:
-            self.memory_mode_active = False
-            return 0.0
 
-        now_ns = self.get_clock().now().nanoseconds
-        if now_ns <= self.turn_memory_until_ns and self.turn_memory_sign != 0.0:
-            self.memory_mode_active = True
-            return self.turn_memory_sign * self.turn_memory_strength
 
-        self.memory_mode_active = False
-        return 0.0
+    def consig_callback(self,msg):
+        self.get_logger().info("Control signal : " + str(msg.data))
+        
+        if msg.data == 10:
+            acceleration_cmd = -5.0
+            self.steer_change_cmd = 0.5
+            #rv23aao : Need to change this afterwards
+            #steering_cmd = self.prev_steering
+            steering_cmd = self.steer_rad
+            self.publish_command(acceleration_cmd, steering_cmd)
+            # rclpy.time.sleep(5)
+            
+            msg = Bool()
+            msg.data = True  # or 1
+            self.get_logger().info("---------->  ENGAGING STOP In Acceleration")
+            # self.mission_flag_pub.publish(msg)
+            self.mission_completed_pub.publish(msg)
+            #self.mission_flag_pub.publish(msg)
+        elif msg.data == 30:
+            acceleration_cmd = -1.0
+            #rv23aao : Need to change this afterwards
+            steering_cmd = self.steer_rad
+            self.publish_command(acceleration_cmd, steering_cmd)
+        elif msg.data == 40:
+            acceleration_cmd = -1
+            #rv23aao : Need to change this afterwards
+            steering_cmd = self.steer_rad
+            self.publish_command(acceleration_cmd, steering_cmd)
+        elif msg.data == 90:
+            acceleration_cmd = -1
+            #rv23aao : Need to change this afterwards
+            steering_cmd = self.steer_rad
+            self.publish_command(acceleration_cmd, steering_cmd)
 
-    def should_use_blind_recovery(self, now_ns):
-        if self.last_path_seen_ns == 0:
-            return False
-        return (now_ns - self.last_path_seen_ns) <= int(self.blind_recovery_hold_sec * 1e9)
 
-    def get_acceleration(self, speed_target):
+
+    def cones_callback(self, msg: ConeArrayWithCovariance):
+        blue_cones = self.convert(msg.blue_cones)
+        yellow_cones = self.convert(msg.yellow_cones)
+        orange_cones = self.convert(msg.orange_cones)
+        big_orange_cones = self.convert(msg.big_orange_cones)
+
+        self.get_logger().info(f"Number of small orange cones: {len(orange_cones)}")
+
+        # Check stopping condition
+        if len(blue_cones) == 0 and len(yellow_cones) == 0 and len(big_orange_cones) == 0 and len(orange_cones) >= 4:
+            if self.stop_triggered:
+                self.get_logger().info("Stopping already triggered, ignoring cones")
+                return
+            self.stop_triggered = True
+            self.get_logger().warn("Stop condition detected from cones, engaging braking")
+            self.publish_command(-2.0, 0.0)
+            stop_msg = Bool()
+            stop_msg.data = True
+            self.mission_completed_pub.publish(stop_msg)
+            self.driving_flag_pub.publish(stop_msg)
+            
+    def convert(self, cones):
         """
-        Note: the current speed of the car is saved in self.speed
-        the PID gains are saved in self.K_p, self.K_i, self.K_d
-        :param speed_target: speed we want to achieve
-        :return: acceleration command to be sent to the car
+        Converts a cone array message into a np array of complex
         """
-        if speed_target <= 0.0:
-            return 0.0
+        return np.array([c.point.x + 1j * c.point.y for c in cones])
 
-        Kp = 0.8
-        acc_error = speed_target - self.current_speed
-        new_acc = Kp * acc_error
 
-        return max(-1.0, min(2.0, new_acc))
-
-    def publish_command(self, acceleration, steering, speed_target):
+    def publish_command(self, acceleration: float, steering: float):
         msg = AckermannDriveStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "pure_pursuit"
+        msg.header.stamp         = self.get_clock().now().to_msg()
+        msg.header.frame_id      = "pure_pursuit"
         msg.drive.steering_angle = steering
-        msg.drive.acceleration = acceleration
-        msg.drive.speed = speed_target
+        msg.drive.acceleration   = acceleration
+        self.cmd_pub.publish(msg)
 
-        self.command_pub.publish(msg)
+    def publish_visualisation(self, accel: float, steer_deg: float, speed: float):
+        m = Marker()
+        m.header.stamp    = self.get_clock().now().to_msg()
+        m.header.frame_id = "base_footprint"
+        m.type            = Marker.TEXT_VIEW_FACING
+        m.action          = Marker.ADD
+        m.ns              = "controls"
+        m.id              = 0
+        m.scale.x = 0.0
+        m.scale.y = 0.0
+        m.scale.z = 0.5
+        m.pose.position.x = 3.0
+        m.pose.position.y = 4.0
+        m.pose.position.z = 1.0
+        m.pose.orientation.w = 1.0
+        m.color.a = 1.0
+        m.color.r = 1.0
+        m.color.g = 1.0
+        m.color.b = 1.0
+        m.text = (
+            f"Speed: {speed:.2f}  Range:[{self.min_speed:.1f},{self.max_speed:.1f}]\n"
+            f"Steer: {steer_deg:.1f}°\n"
+            f"Accel: {accel:.2f}"
+        )
+        self.viz_pub.publish(m)
 
-    def publish_visualisation(self, acceleration, steering_angle):
-        marker = Marker()
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.header.frame_id = "base_footprint"
-        marker.type = Marker.TEXT_VIEW_FACING
-        marker.color.a = 1.0
-        marker.color.r = 0.0
-        marker.color.g = 1.0
-        marker.color.b = 0.0
-        marker.pose.position.x = 3.0
-        marker.pose.position.y = 4.0
-        marker.pose.position.z = 1.0
-        marker.id = 0
-        marker.ns = "controls"
-        marker.scale.x = 0.35
-        marker.scale.y = 0.35
-        marker.scale.z = 0.5
-        marker.text = f" Speed: {round(self.current_speed, 1)} \n " \
-                      f"Acceleration: {round(acceleration, 1)} \n " \
-                      f"Steering: {round(steering_angle, 1)} \n " \
-                      f"Memory: {'ON' if self.memory_mode_active else 'OFF'}"
-
-        self.viz_pub.publish(marker)
-
-    def publish_look_ahead_index(self, look_ahead_index):
-        marker = Marker()
-        marker.header.frame_id = "base_footprint"
-        marker.action = Marker.ADD
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.type = Marker.POINTS
-        marker.color.a = 1.0
-        marker.color.r = 0.0
-        marker.color.g = 0.0
-        marker.color.b = 1.0
-        marker.id = 1
-        marker.scale.x = 0.35
-        marker.scale.y = 0.35
-        marker.ns = "look_ahead_index"
-        marker.points.append(Point(x=look_ahead_index.real, y=look_ahead_index.imag))
-
-        self.visualization_look_ahead_index.publish(marker)
-
-    def convert(self, waypoints, struct = ''):
-        """
-        Converts a cone array message into a np array of complex or 2d list
-        :param cones: ConeArrayWithCovariance
-        :param struct: Type of output list
-        :return:
-        """
-        if struct == "np":
-            return [p.position.x + 1j * p.position.y for p in waypoints.waypoints]
-        else:
-            return [[p.position.x, p.position.y] for p in waypoints.waypoints]
-
+    def publish_static_lookahead_marker(self, wp):
+        m = Marker()
+        m.header.stamp    = self.get_clock().now().to_msg()
+        m.header.frame_id = "base_footprint"
+        m.ns              = "static_lookahead"
+        m.id              = 42
+        m.type            = Marker.SPHERE
+        m.action          = Marker.ADD
+        m.pose.position.x = wp[0]
+        m.pose.position.y = wp[1]
+        m.pose.position.z = 0.0
+        m.pose.orientation.w = 1.0
+        m.scale.x = m.scale.y = m.scale.z = 0.3
+        m.color.r = 1.0
+        m.color.a = 1.0
+        self.index_viz_pub.publish(m)
 
 def main():
-    rclpy.init(args=None)
-    node = Control("pure_pursuit")
+    rclpy.init()
+    node = Control()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
+        pass
+    finally:
         node.destroy_node()
         rclpy.shutdown()
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

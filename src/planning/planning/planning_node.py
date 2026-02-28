@@ -1,201 +1,476 @@
-import math
-import rclpy
-from rclpy.executors import MultiThreadedExecutor
+from turtle import distance
+from eufs_msgs.msg import WaypointArrayStamped, Waypoint, ConeArrayWithCovariance, CanState, FullState
+from geometry_msgs.msg import Point
+from visualization_msgs.msg import Marker
 from rclpy.node import Node
-from eufs_msgs.msg import ConeArrayWithCovariance, Waypoint, WaypointArrayStamped
+import rclpy
+import math
+from std_msgs.msg import Int16
+from typing import List, Tuple
+
+
+# from sensor_msgs.msg import gps
+
+import numpy as np
 
 
 class Planner(Node):
-    def __init__(self, name, executor):
+    def __init__(self, name):
         super().__init__(name)
-        self.executor = executor
-        self.half_track_width = 1.5
-        self.pairing_distance = 5.0
+        self.tmp_id = 0
 
-        self.create_subscription(ConeArrayWithCovariance, '/cones', self.on_cones, 1)
-        self.midpoint_pub = self.create_publisher(WaypointArrayStamped, '/midpoints', 10)
-        self.trajectory_pub = self.create_publisher(WaypointArrayStamped, '/trajectory', 10)
-        self.get_logger().info('planning_node active: using built-in midpoint planner')
+        # Declare ROS parameters
+        self.threshold = self.declare_parameter("threshold", 6.0).value
 
-    def on_cones(self, msg):
-        blue_cones = list(msg.blue_cones)
-        yellow_cones = list(msg.yellow_cones)
+        # Create subscribers
+        self.cones_sub = self.create_subscription(ConeArrayWithCovariance, "/cones", self.cones_callback, 1)
 
-        for cone in msg.big_orange_cones:
-            if cone.point.y < 0.0:
-                yellow_cones.append(cone)
+        # Create publishers
+        self.track_line_pub = self.create_publisher(WaypointArrayStamped, "/trajectory", 1)
+        self.pub_blue_cones = self.create_publisher(Marker, "/planner/LineStripBlueCones", 1)
+        self.pub_yellow_cones = self.create_publisher(Marker, "/planner/LineStripYellowCones", 1)
+        self.pub_midpoints = self.create_publisher(Marker, "/planner/LineStripMidPoints", 1)
+        self.pub_pair_lines = self.create_publisher(Marker, "/planner/ConePairLines", 1)
+        self.pub_circle_margin = self.create_publisher(Marker, "/planner/CircleMargin", 1)
+
+
+        self.car_state_sub1 = self.create_subscription(CanState, "/ros_can/state", self.state_callback, 1)
+        self.control_sig_pub = self.create_publisher(Int16,"/planner/ConSig", 1)
+
+
+
+
+        self.lap_count = 0
+        self.is_big_orange_cone = False
+        self.is_small_orange_cone = False
+        self.blue_cone_count = 0
+        self.orange_cone_count = 0
+        self.yellow_cone_count = 0
+
+        self.yoffset = 0.0 #TODO Needs to calibarte this number with testing
+        self.width = 3 #TODO Needs to calibarte this number with testing (Based on testing from simulateor 4.5)
+        self.forward_filter_distance = 12 #TODO Needs to calibarte this number with testing
+
+
+
+
+    
+    def cones_callback(self, msg):
+        self.get_logger().info(f"Lap count: {self.lap_count}")
+        blue_cones = self.parse_cones_coords(msg.blue_cones)
+        yellow_cones = self.parse_cones_coords(msg.yellow_cones)
+        self.orange_cone_count = len(msg.orange_cones)
+        print(self.orange_cone_count)
+
+
+
+      
+
+
+
+        for cone in msg.orange_cones:
+            if(cone.point.y < 0):
+                msg.yellow_cones.append(cone)
             else:
-                blue_cones.append(cone)
+                msg.blue_cones.append(cone)
+        
+        midpoints, pair_lines = self.calculate_midpoints(
+            msg.yellow_cones, 
+            msg.blue_cones
+        )
 
-        midpoints = self.calculate_midpoints_with_fallback(blue_cones, yellow_cones)
-        if not midpoints:
-            return
+        # midpoints += self.calculate_midpoints(
+        #     [c for c in msg.orange_cones if c.point.y > 0], 
+        #     [c for c in msg.orange_cones if c.point.y < 0]
+        # )
 
-        ordered = self.order_forward(midpoints)
-        if ordered and ordered[0][0] > 0.2:
-            ordered.insert(0, [0.0, 0.0])
 
-        self.publish_waypoints(self.midpoint_pub, ordered, speed=0.0)
-        self.publish_waypoints(self.trajectory_pub, ordered, speed=2.5)
+        midpoints = self.order_cones_forward(midpoints, filter_radius=3)
+        midpoints.insert(0, [0.0, 0.0])
+        midpoints.insert(1, [3.0, 0.0])
+        midpoints = self.to_bezier(midpoints, 0.5)
+        self.publish_path(midpoints)
 
-    def publish_waypoints(self, publisher, points, speed):
-        msg = WaypointArrayStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'base_footprint'
+        self.publish_path(midpoints)
+        self.publish_line(1, self.pub_blue_cones, [0, 0, 1], blue_cones)
+        self.publish_line(2, self.pub_yellow_cones, [1, 1, 0], yellow_cones)
+        self.publish_line(3, self.pub_midpoints, [0, 1, 1], midpoints)
+        self.publish_pair_lines(4, self.pub_pair_lines, [1, 0, 1], pair_lines)
 
-        for point_xy in points:
-            waypoint = Waypoint()
-            waypoint.position.x = float(point_xy[0])
-            waypoint.position.y = float(point_xy[1])
-            waypoint.position.z = 0.0
-            waypoint.speed = speed
-            waypoint.suggested_steering = 0.0
-            msg.waypoints.append(waypoint)
 
-        publisher.publish(msg)
 
-    def calculate_midpoints_with_fallback(self, blue_cones, yellow_cones):
-        midpoints = []
-
-        if blue_cones and yellow_cones:
-            pairs, _, _ = self.match_cones(blue_cones, yellow_cones, float('inf'))
-            for blue_cone, yellow_cone in pairs:
-                midpoints.append([
-                    (blue_cone.point.x + yellow_cone.point.x) / 2.0,
-                    (blue_cone.point.y + yellow_cone.point.y) / 2.0,
-                ])
-            return midpoints
-
-        if blue_cones and not yellow_cones:
-            side_sign = self.estimate_side_sign(blue_cones)
-            for blue_cone in blue_cones:
-                midpoints.append(self.fallback_from_single_cone(blue_cone, blue_cones, [], side_sign))
-            return midpoints
-
-        if yellow_cones and not blue_cones:
-            side_sign = self.estimate_side_sign(yellow_cones)
-            for yellow_cone in yellow_cones:
-                midpoints.append(self.fallback_from_single_cone(yellow_cone, yellow_cones, [], side_sign))
-            return midpoints
-
-        return midpoints
-
-    def match_cones(self, side_a, side_b, max_distance):
-        used_b = set()
-        pairs = []
-        unmatched_a = []
-
-        for cone_a in side_a:
-            best_index = None
-            best_distance = max_distance
-
-            for index_b, cone_b in enumerate(side_b):
-                if index_b in used_b:
-                    continue
-                distance = self.distance(cone_a.point.x, cone_a.point.y, cone_b.point.x, cone_b.point.y)
-                if distance < best_distance:
-                    best_distance = distance
-                    best_index = index_b
-
-            if best_index is None:
-                unmatched_a.append(cone_a)
-            else:
-                used_b.add(best_index)
-                pairs.append((cone_a, side_b[best_index]))
-
-        unmatched_b = [cone_b for index_b, cone_b in enumerate(side_b) if index_b not in used_b]
-        return pairs, unmatched_a, unmatched_b
-
-    def fallback_from_single_cone(self, cone, same_side_cones, opposite_side_cones, side_sign=None):
-        tangent_x, tangent_y = self.estimate_tangent(cone, same_side_cones)
-        normal_1 = (-tangent_y, tangent_x)
-        normal_2 = (tangent_y, -tangent_x)
-
-        chosen_normal = self.pick_inward_normal(cone, normal_1, normal_2, opposite_side_cones, side_sign)
-        normal_norm = math.hypot(chosen_normal[0], chosen_normal[1])
-        if normal_norm < 1e-6:
-            chosen_normal = (0.0, -1.0 if cone.point.y >= 0.0 else 1.0)
-            normal_norm = 1.0
-
-        nx = chosen_normal[0] / normal_norm
-        ny = chosen_normal[1] / normal_norm
-        return [
-            cone.point.x + nx * self.half_track_width,
-            cone.point.y + ny * self.half_track_width,
+        return
+    def order_cones_forward(self, cones, filter_radius):
+        in_range = [
+            c for c in cones
+            if math.hypot(c[0], c[1]) > filter_radius
         ]
+        return sorted(in_range, key=lambda c: c[0])
 
-    def pick_inward_normal(self, cone, normal_1, normal_2, opposite_side_cones, side_sign=None):
-        if opposite_side_cones:
-            mean_x = sum(c.point.x for c in opposite_side_cones) / len(opposite_side_cones)
-            mean_y = sum(c.point.y for c in opposite_side_cones) / len(opposite_side_cones)
-            toward_other = (mean_x - cone.point.x, mean_y - cone.point.y)
-            dot_1 = normal_1[0] * toward_other[0] + normal_1[1] * toward_other[1]
-            dot_2 = normal_2[0] * toward_other[0] + normal_2[1] * toward_other[1]
-            return normal_1 if dot_1 >= dot_2 else normal_2
+        
 
-        if side_sign is None:
-            side_sign = 1.0 if cone.point.y >= 0.0 else -1.0
 
-        desired_y_direction = -side_sign
-        score_1 = normal_1[1] * desired_y_direction
-        score_2 = normal_2[1] * desired_y_direction
-        if score_1 == score_2:
-            y_after_1 = abs(cone.point.y + normal_1[1] * self.half_track_width)
-            y_after_2 = abs(cone.point.y + normal_2[1] * self.half_track_width)
-            return normal_1 if y_after_1 <= y_after_2 else normal_2
+    def parse_cones_coords(self, cones):
+        arr = []
 
-        return normal_1 if score_1 > score_2 else normal_2
+        for cone in cones:
+            arr.append([
+                float(cone.point.x),
+                float(cone.point.y)
+            ])
 
-    def estimate_side_sign(self, cones):
-        if not cones:
-            return 1.0
-        mean_y = sum(c.point.y for c in cones) / len(cones)
-        return 1.0 if mean_y >= 0.0 else -1.0
+        return arr
 
-    def estimate_tangent(self, cone, same_side_cones):
-        nearest = None
-        nearest_distance = float('inf')
+    def insert_initial_cone(self, con, cones):
+        arr = cones[:]
+        if con:
+            arr.remove(con)
 
-        for other in same_side_cones:
-            if other is cone:
+        if con:
+            arr.insert(0, con)
+
+        return arr
+        
+    def inRange(self, points, radius):
+        return [point for point in points if (point[0] ** 2 + point[1] ** 2) ** 0.5 <= radius]
+
+
+    def find_closest_cone(self, p, cones, render_distance=99):
+        if not p or not cones:
+            return None
+        
+        closest_cone = None
+        min_distance = float('inf')
+        
+        for cone in cones:
+            cx, cy = cone.point.x - p.point.x, cone.point.y - p.point.y
+            cone_distance = math.sqrt(cx**2 + cy**2)
+            
+            if cone_distance > render_distance:
                 continue
-            dx = other.point.x - cone.point.x
-            dy = other.point.y - cone.point.y
-            d = math.hypot(dx, dy)
-            if d < 1e-6:
+            
+            if cone_distance < min_distance:
+                min_distance = cone_distance
+                closest_cone = cone
+        
+        return closest_cone
+
+    def generate_imaginary_point(self, p1, p2, distance, direction):
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+        angle = math.atan2(dy, dx) + (math.pi / 2) * direction
+        
+        new_x = p2[0] + distance * math.cos(angle)
+        new_y = p2[1] + distance * math.sin(angle)
+        
+        return float(new_x), float(new_y)
+
+    def generate_imaginary_points(self, points, distance, direction):
+        imaginary_points = []
+        
+        for i in range(len(points) - 1):
+            x, y = self.generate_imaginary_point(points[i], points[i + 1], distance, direction)
+            imaginary_points.append([x, y])
+        
+        return imaginary_points
+
+    def calculate_midpoints(self, c1, c2):
+        midpoints = []
+        pair_lines = []
+
+        if not c1 or not c2:
+            return midpoints, pair_lines
+
+        candidates = []
+        for idx1, cone1 in enumerate(c1):
+            for idx2, cone2 in enumerate(c2):
+                dx = cone2.point.x - cone1.point.x
+                dy = cone2.point.y - cone1.point.y
+                d = math.hypot(dx, dy)
+                if d <= self.threshold:
+                    candidates.append((d, idx1, idx2))
+
+        if not candidates:
+            return midpoints, pair_lines
+
+        candidates.sort(key=lambda item: item[0])
+
+        used_c1 = set()
+        used_c2 = set()
+        for _, idx1, idx2 in candidates:
+            if idx1 in used_c1 or idx2 in used_c2:
                 continue
-            if d < nearest_distance:
-                nearest_distance = d
-                nearest = other
 
-        if nearest is None:
-            return 1.0, 0.0
+            used_c1.add(idx1)
+            used_c2.add(idx2)
 
-        tx = nearest.point.x - cone.point.x
-        ty = nearest.point.y - cone.point.y
-        norm = math.hypot(tx, ty)
-        if norm < 1e-6:
-            return 1.0, 0.0
-        return tx / norm, ty / norm
+            cone1 = c1[idx1]
+            cone2 = c2[idx2]
 
-    def order_forward(self, points):
-        filtered = [p for p in points if math.hypot(p[0], p[1]) > 0.3]
-        return sorted(filtered, key=lambda p: (p[0], abs(p[1])))
+            mx = (cone1.point.x + cone2.point.x) / 2.0
+            my = (cone1.point.y + cone2.point.y) / 2.0
+            midpoints.append([float(mx), float(my)])
+            pair_lines.append([
+                [float(cone1.point.x), float(cone1.point.y)],
+                [float(cone2.point.x), float(cone2.point.y)]
+            ])
 
-    def distance(self, x1, y1, x2, y2):
-        return math.hypot(x2 - x1, y2 - y1)
+        return midpoints, pair_lines
+ 
+
+
+    
+     
+
+    def state_callback(self, msg):
+       
+        con_sig = Int16()
+        self.get_logger().info(" ami_state :" + str(msg.ami_state) + " self.state :" + str(msg.as_state))
+        
+
+
+        # if Acceleration and vehicle not stopped 
+        if msg.ami_state == 11 and (msg.as_state != 4):
+            
+            #if the vehicle in ready state and not Finished
+            if (msg.as_state == 2):
+
+                    # logic for Accelearation check and stop 
+                # if self.lap_count == 2 and  self.is_big_orange_cone == False:
+                
+                if (self.orange_cone_count >= 5) and ((self.blue_cone_count == 0) and (self.yellow_cone_count == 0)):
+                    con_sig.data = 10
+                    self.control_sig_pub.publish(con_sig)
+        #If Skidpad and Vehicle not stopped 
+        elif msg.ami_state == 12 and (msg.as_state != 4):
+            #if the vehicle in ready state and not Finished
+            if (msg.as_state == 2) and (msg.as_state != 4) :
+                    # logic for Skidpad check and stop 
+                if self.lap_count == 5 and  self.is_big_orange_cone == False:
+                    con_sig.data = 20
+                    self.control_sig_pub.publish(con_sig)
+        #If  Autocross and vehicle not stopped     
+        elif msg.ami_state == 13 and (msg.as_state != 4):
+            #if the vehicle in ready state and not Finished
+            if (msg.as_state == 2) and (msg.as_state != 4) :
+                    # logic for Autocross check and stop 
+                if self.lap_count == 2 and self.is_big_orange_cone == False:
+                    con_sig.data = 30
+                    self.control_sig_pub.publish(con_sig)
+        #If  Track Drive  and vehicle not stopped     
+        elif msg.ami_state == 14 and (msg.as_state != 4):
+            #if the vehicle in ready state and not Finished
+            if (msg.as_state == 2) and (msg.as_state != 4) :
+                # logic for Track Drive check and stop 
+                #rv23aao : change this before actual code 
+                if self.lap_count == 4 and self.is_big_orange_cone == False:
+                    con_sig.data = 40
+                    self.control_sig_pub.publish(con_sig)
+        #For small track  with Manual drive = 21          
+        elif msg.ami_state == 21:
+                # logic for Track Drive check and stop 
+                if self.lap_count == 2 and self.is_big_orange_cone == False:
+                    con_sig.data = 90
+                    self.control_sig_pub.publish(con_sig)
+ #       else:
+ #               con_sig.data = 99
+ #              self.control_sig_pub.publish(con_sig)
+
+
+
+    def filter_points(self, ps, fov=90, render_distance=3):
+        def angle_between_points(p1, p2):
+            return math.degrees(math.atan2(p2[1] - p1[1], p2[0] - p1[0]))
+        
+        def distance_between_points(p1, p2):
+            return ((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2) ** 0.5
+        
+        sorted_mps = []
+        remaining = ps[:]
+
+        if len(remaining) == 0: return sorted_mps
+        
+        current_point = remaining.pop(0)
+        sorted_mps.append(current_point)
+        current_orientation = None
+
+        while remaining:
+            if current_orientation is not None:
+                candidates = []
+                for point in remaining:
+                    angle_to_point = angle_between_points(current_point, point)
+                    distance_to_point = distance_between_points(current_point, point)
+                    
+                    if (
+                        abs((angle_to_point - current_orientation + 180) % 360 - 180) <= fov / 2
+                        and distance_to_point <= render_distance
+                    ):
+                        candidates.append(point)
+
+                if not candidates:
+                    break
+
+                next_point = min(candidates, key=lambda p: distance_between_points(current_point, p))
+            else:
+                candidates = [p for p in remaining if distance_between_points(current_point, p) <= render_distance]
+                if not candidates:
+                    break 
+                next_point = min(candidates, key=lambda p: distance_between_points(current_point, p))
+            
+            current_orientation = angle_between_points(current_point, next_point)
+
+            current_point = next_point
+            sorted_mps.append(next_point)
+            remaining.remove(next_point)
+
+        return sorted_mps
+    
+    def calc_angle_of_turn(self, p1, p2, p3):
+        def angle_between_vectors(v1, v2):
+            dot_product = np.dot(v1, v2)
+            magnitude_v1 = np.linalg.norm(v1)
+            magnitude_v2 = np.linalg.norm(v2)
+            angle = np.arccos(dot_product / (magnitude_v1 * magnitude_v2))
+            cross_product = np.cross(v1, v2)
+            return np.degrees(angle) if cross_product >= 0 else -np.degrees(angle)
+
+        v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
+        v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
+        return angle_between_vectors(v1, v2)
+
+    def to_bezier(self, mp, distance):
+        def bezier(t, points):
+            n = len(points) - 1
+            return sum(
+                (np.math.comb(n, i) * (1 - t) ** (n - i) * t ** i * np.array(points[i]))
+                for i in range(n + 1)
+            )
+
+        def arc_length(points, steps=1000):
+            t_values = np.linspace(0, 1, steps)
+            curve_points = [bezier(t, points) for t in t_values]
+            distances = [np.linalg.norm(curve_points[i] - curve_points[i - 1]) for i in range(1, len(curve_points))]
+            cumulative_distances = np.cumsum(distances)
+            return cumulative_distances, curve_points
+
+        cumulative_distances, curve_points = arc_length(mp)
+
+        total_length = cumulative_distances[-1]
+
+        target_distances = np.arange(0, total_length, distance)
+        bezier_curve = []
+        idx = 0
+
+        for target in target_distances:
+            while idx < len(cumulative_distances) and cumulative_distances[idx] < target:
+                idx += 1
+            if idx >= len(cumulative_distances):
+                break
+
+            if idx == 0:
+                bezier_curve.append(curve_points[0])
+            else:
+                prev_point = curve_points[idx - 1]
+                next_point = curve_points[idx]
+                prev_dist = cumulative_distances[idx - 1]
+                next_dist = cumulative_distances[idx]
+                alpha = (target - prev_dist) / (next_dist - prev_dist)
+                interpolated_point = prev_point + alpha * (next_point - prev_point)
+                bezier_curve.append(interpolated_point)
+
+        return [point.tolist() for point in bezier_curve]
+
+
+    def toFixedBezier(self, points, num_points):
+        if len(points) < 2:
+            return points
+
+        bezier_points = []
+        
+        for t in range(num_points):
+            t = t / (num_points - 1)
+            
+            temp_points = points[:]
+            
+            while len(temp_points) > 1:
+                temp_points = [
+                    [(1 - t) * p1[0] + t * p2[0], (1 - t) * p1[1] + t * p2[1]]
+                    for p1, p2 in zip(temp_points[:-1], temp_points[1:])
+                ]
+            
+            bezier_points.append(temp_points[0])
+
+        return bezier_points
+
+    def publish_path(self, midpoints):
+        waypoint_array = WaypointArrayStamped()
+        waypoint_array.header.frame_id = "base_footprint"
+        waypoint_array.header.stamp = self.get_clock().now().to_msg()
+
+        for p in midpoints:
+            point = Point(x=p[0], y=p[1])
+            waypoint = Waypoint(position=point)
+            waypoint_array.waypoints.append(waypoint)
+
+        self.track_line_pub.publish(waypoint_array)
+
+    def publish_line(self, id, publisher, rgb, data, scale=0.1):
+        if(not len(data)): return
+        if(type(data[0]) != list):
+            data = [data]
+
+        marker = Marker()
+        marker.header.frame_id = "base_footprint"
+        marker.action = Marker.ADD
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.type = Marker.LINE_STRIP
+        marker.color.a = 1.0
+        marker.color.r = float(rgb[0])
+        marker.color.g = float(rgb[1])
+        marker.color.b = float(rgb[2])
+        marker.id = id
+        marker.scale.x = scale
+        marker.scale.y = scale
+        marker.ns = "line_stip"
+        for line in data:
+            marker.points.append(Point(x=line[0], y=line[1]))
+
+        publisher.publish(marker)
+
+    def publish_pair_lines(self, id, publisher, rgb, pairs, scale=0.05):
+        marker = Marker()
+        marker.header.frame_id = "base_footprint"
+        marker.action = Marker.ADD
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.type = Marker.LINE_LIST
+        marker.color.a = 1.0
+        marker.color.r = float(rgb[0])
+        marker.color.g = float(rgb[1])
+        marker.color.b = float(rgb[2])
+        marker.id = id
+        marker.scale.x = scale
+        marker.scale.y = scale
+        marker.ns = "pair_lines"
+
+        for pair in pairs:
+            marker.points.append(Point(x=pair[0][0], y=pair[0][1]))
+            marker.points.append(Point(x=pair[1][0], y=pair[1][1]))
+
+        publisher.publish(marker)
+
+
+
+
 
 def main():
-    rclpy.init()
-    executor = MultiThreadedExecutor()
-    planner = Planner('planning_node', executor)
-    executor.add_node(planner)
+    rclpy.init(args=None)
+    node = Planner("local_planner")
     try:
-        executor.spin()
-    finally:
-        executor.shutdown()
-        planner.destroy_node()
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
