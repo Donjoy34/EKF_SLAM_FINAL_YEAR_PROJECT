@@ -5,7 +5,7 @@ from visualization_msgs.msg import Marker
 from rclpy.node import Node
 import rclpy
 import math
-from std_msgs.msg import Int16
+from std_msgs.msg import Int16, Bool
 from typing import List, Tuple
 
 
@@ -36,6 +36,7 @@ class Planner(Node):
 
         self.car_state_sub1 = self.create_subscription(CanState, "/ros_can/state", self.state_callback, 1)
         self.control_sig_pub = self.create_publisher(Int16,"/planner/ConSig", 1)
+        self.turn_memory_pub = self.create_publisher(Bool, "/planner/turn_memory_active", 1)
 
 
 
@@ -50,6 +51,7 @@ class Planner(Node):
         self.yoffset = 0.0 #TODO Needs to calibarte this number with testing
         self.width = 3 #TODO Needs to calibarte this number with testing (Based on testing from simulateor 4.5)
         self.forward_filter_distance = 12 #TODO Needs to calibarte this number with testing
+        self.turn_memory_sign = 1.0
 
 
 
@@ -86,15 +88,22 @@ class Planner(Node):
 
 
         midpoints = self.order_cones_forward(midpoints, filter_radius=3)
-        midpoints.insert(0, [0.0, 0.0])
-        midpoints.insert(1, [3.0, 0.0])
-        midpoints = self.to_bezier(midpoints, 0.5)
-        self.publish_path(midpoints)
+        memory_msg = Bool()
+        if midpoints:
+            self.update_turn_memory_from_midpoints(midpoints)
+            path_points = [[0.0, 0.0], [3.0, 0.0]] + midpoints
+            path_points = self.to_bezier(path_points, 0.5)
+            memory_msg.data = False
+        else:
+            path_points = self.get_turn_memory_path()
+            memory_msg.data = True
 
-        self.publish_path(midpoints)
+        self.turn_memory_pub.publish(memory_msg)
+
+        self.publish_path(path_points)
         self.publish_line(1, self.pub_blue_cones, [0, 0, 1], blue_cones)
         self.publish_line(2, self.pub_yellow_cones, [1, 1, 0], yellow_cones)
-        self.publish_line(3, self.pub_midpoints, [0, 1, 1], midpoints)
+        self.publish_line(3, self.pub_midpoints, [0, 1, 1], path_points)
         self.publish_pair_lines(4, self.pub_pair_lines, [1, 0, 1], pair_lines)
 
 
@@ -106,6 +115,26 @@ class Planner(Node):
             if math.hypot(c[0], c[1]) > filter_radius
         ]
         return sorted(in_range, key=lambda c: c[0])
+
+    def update_turn_memory_from_midpoints(self, midpoints):
+        forward_points = [p for p in midpoints if p[0] > 1.0]
+        if not forward_points:
+            return
+
+        sample = forward_points[:min(4, len(forward_points))]
+        mean_y = sum(p[1] for p in sample) / len(sample)
+        if abs(mean_y) > 0.1:
+            self.turn_memory_sign = 1.0 if mean_y > 0.0 else -1.0
+
+    def get_turn_memory_path(self):
+        direction = 1.0 if self.turn_memory_sign >= 0.0 else -1.0
+        return [
+            [0.0, 0.0],
+            [1.5, 0.25 * direction],
+            [3.0, 0.7 * direction],
+            [4.5, 1.35 * direction],
+            [6.0, 2.2 * direction],
+        ]
 
         
 
@@ -214,6 +243,54 @@ class Planner(Node):
                 [float(cone1.point.x), float(cone1.point.y)],
                 [float(cone2.point.x), float(cone2.point.y)]
             ])
+
+        # Zig-zag fallback pairing on unmatched cones to recover missing midpoints in turns.
+        unmatched_c1 = [i for i in range(len(c1)) if i not in used_c1]
+        unmatched_c2 = [i for i in range(len(c2)) if i not in used_c2]
+        if unmatched_c1 and unmatched_c2:
+            unmatched_c1.sort(key=lambda i: c1[i].point.x)
+            zigzag_threshold = self.threshold * 1.8
+            c2_reuse_count = {}
+            max_reuse = 2
+
+            for k, idx1 in enumerate(unmatched_c1):
+                ranked = []
+                for idx2 in unmatched_c2:
+                    d = math.hypot(
+                        c2[idx2].point.x - c1[idx1].point.x,
+                        c2[idx2].point.y - c1[idx1].point.y,
+                    )
+                    if d <= zigzag_threshold:
+                        ranked.append((d, idx2))
+
+                if not ranked:
+                    continue
+
+                ranked.sort(key=lambda item: item[0])
+                preferred_rank = 1 if (k % 2 == 1 and len(ranked) > 1) else 0
+
+                choose_order = [preferred_rank, 0, 1, 2]
+                candidate_idx2 = None
+                for rank_idx in choose_order:
+                    if rank_idx >= len(ranked):
+                        continue
+                    idx2 = ranked[rank_idx][1]
+                    if c2_reuse_count.get(idx2, 0) >= max_reuse:
+                        continue
+                    candidate_idx2 = idx2
+                    break
+
+                if candidate_idx2 is None:
+                    continue
+
+                mx = (c1[idx1].point.x + c2[candidate_idx2].point.x) / 2.0
+                my = (c1[idx1].point.y + c2[candidate_idx2].point.y) / 2.0
+                midpoints.append([float(mx), float(my)])
+                pair_lines.append([
+                    [float(c1[idx1].point.x), float(c1[idx1].point.y)],
+                    [float(c2[candidate_idx2].point.x), float(c2[candidate_idx2].point.y)]
+                ])
+                c2_reuse_count[candidate_idx2] = c2_reuse_count.get(candidate_idx2, 0) + 1
 
         return midpoints, pair_lines
  

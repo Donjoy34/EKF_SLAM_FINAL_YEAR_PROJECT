@@ -59,12 +59,16 @@ class Control(Node):
         self.declare_parameter("Kp_acc", 0.00)
         self.declare_parameter("Ki_acc", 0.00)
         self.declare_parameter("Kd_acc", 0.00)
+        self.declare_parameter("wheel_radius_m", 0.2525)
+        self.declare_parameter("speed_timeout_sec", 0.5)
         # ±60° steering limit, back off at ±59°
         self.declare_parameter("steer_limit_deg", 60.0)
         self.declare_parameter("steer_cap_deg",   59.0)
 
         self.min_speed  = self.get_parameter("min_speed").value
         self.max_speed  = self.get_parameter("max_speed").value
+        self.wheel_radius_m = self.get_parameter("wheel_radius_m").value
+        self.speed_timeout_sec = self.get_parameter("speed_timeout_sec").value
         self._steer_lim = self.get_parameter("steer_limit_deg").value
         self._steer_cap = self.get_parameter("steer_cap_deg").value
 
@@ -81,7 +85,7 @@ class Control(Node):
 
         # ROS interfaces
         self.create_subscription(WaypointArrayStamped, "/trajectory", self.path_callback, 1)
-        #self.create_subscription(CarState,            "/ground_truth/state", self.state_callback, 1)
+        self.create_subscription(CarState, "/ground_truth/state", self.state_callback, 1)
         #Create subscribers
         self.create_subscription(ConeArrayWithCovariance, "/cones", self.cones_callback, 1)
 
@@ -98,16 +102,23 @@ class Control(Node):
         self.cmd_pub       = self.create_publisher(AckermannDriveStamped, "/cmd",        1)
         self.viz_pub       = self.create_publisher(Marker,                  "/control/viz",   1)
         self.index_viz_pub = self.create_publisher(Marker,                  "/control/Index", 1)
+        self.create_subscription(Bool, "/planner/turn_memory_active", self.turn_memory_callback, 1)
 
         self.speed = 0.0
+        self.last_speed_update_ns = 0
+        self.speed_source = "NONE"
+        self.turn_memory_active = False
 
 
     def state_callback(self, msg: CarState):
-        self.speed = msg.twist.twist.linear.x
+        self.speed = abs(float(msg.twist.twist.linear.x))
+        self.last_speed_update_ns = self.get_clock().now().nanoseconds
+        self.speed_source = "GROUND_TRUTH"
 
     def path_callback(self, msg: WaypointArrayStamped):
         # dt for PID
-        now = self.get_clock().now().nanoseconds * 1e-9
+        now_ns = self.get_clock().now().nanoseconds
+        now = now_ns * 1e-9
         dt  = max(1e-6, now - self.prev_time)
         self.prev_time = now
 
@@ -142,10 +153,14 @@ class Control(Node):
         accel_cmd = max(-2.0, min(1.0, accel_cmd))
 
         # Enforce speed window [min, max]
-        if self.speed < self.min_speed:
-            accel_cmd = +2.0
-        elif self.speed > self.max_speed:
-            accel_cmd = -1.0
+        speed_fresh = (now_ns - self.last_speed_update_ns) <= int(float(self.speed_timeout_sec) * 1e9)
+        if speed_fresh:
+            if self.speed < self.min_speed:
+                accel_cmd = +1.0
+            elif self.speed > self.max_speed:
+                accel_cmd = -1.0
+        else:
+            accel_cmd = min(accel_cmd, 0.0)
         if self.stop_triggered:
             self.get_logger().info(" Stopping in progress: Ignoring path control")
             self.publish_command(-1.0, 0.0)  # Maintain braking
@@ -166,6 +181,14 @@ class Control(Node):
         self.ws_as_state = msg.as_state
     def wheel_speed_callback(self, msg):
         self.ws_can_steering= msg.steering
+        rear_rpm = 0.5 * (abs(msg.lb_speed) + abs(msg.rb_speed))
+        wheel_circumference = 2.0 * math.pi * float(self.wheel_radius_m)
+        self.speed = (rear_rpm / 60.0) * wheel_circumference
+        self.last_speed_update_ns = self.get_clock().now().nanoseconds
+        self.speed_source = "WHEEL_RPM"
+
+    def turn_memory_callback(self, msg: Bool):
+        self.turn_memory_active = bool(msg.data)
 
 
 
@@ -263,7 +286,9 @@ class Control(Node):
         m.text = (
             f"Speed: {speed:.2f}  Range:[{self.min_speed:.1f},{self.max_speed:.1f}]\n"
             f"Steer: {steer_deg:.1f}°\n"
-            f"Accel: {accel:.2f}"
+            f"Accel: {accel:.2f}\n"
+            f"Memory: {'ACTIVE' if self.turn_memory_active else 'OFF'}\n"
+            f"SpeedSrc: {self.speed_source}"
         )
         self.viz_pub.publish(m)
 
