@@ -45,12 +45,12 @@ eufs_msgs::msg::WheelSpeeds VehicleModel::getWheelSpeeds(const State &state, con
 
   wheel_speeds.steering = input.delta;
 
-  wheel_speeds.lf_speed = 999;
-  wheel_speeds.rf_speed = 999;
-
-  // Calculate Wheel speeds
-  wheel_speeds.lb_speed = (state.v_x / wheel_circumference) * 60;
-  wheel_speeds.rb_speed = (state.v_x / wheel_circumference) * 60;
+  // Calculate wheel speeds (RPM) for all wheels from longitudinal speed.
+  float wheel_rpm = static_cast<float>((state.v_x / wheel_circumference) * 60);
+  wheel_speeds.lf_speed = wheel_rpm;
+  wheel_speeds.rf_speed = wheel_rpm;
+  wheel_speeds.lb_speed = wheel_rpm;
+  wheel_speeds.rb_speed = wheel_rpm;
 
   return wheel_speeds;
 }
