@@ -108,6 +108,7 @@ class Control(Node):
         self.last_speed_update_ns = 0
         self.speed_source = "NONE"
         self.turn_memory_active = False
+        self.last_pid_out = 0.0
 
 
     def state_callback(self, msg: CarState):
@@ -147,12 +148,13 @@ class Control(Node):
 
         # PID on steering magnitude (target 0°) → pid_out∈[0,1]
         pid_out = self.steer_pid.update(abs(raw_deg), dt)
+        self.last_pid_out = float(pid_out)
 
         # Map pid_out to accel in [–2, +1]: 0→+1, 1→–2
         accel_cmd = 1.0 - 3.0 * pid_out
-        accel_cmd = max(-2.0, min(1.0, accel_cmd))
+        accel_cmd = max(-1.0, min(1.0, accel_cmd))
 
-        # Enforce speed window [min, max]
+        #Enforce speed window [min, max]
         speed_fresh = (now_ns - self.last_speed_update_ns) <= int(float(self.speed_timeout_sec) * 1e9)
         if speed_fresh:
             if self.speed < self.min_speed:
@@ -198,7 +200,7 @@ class Control(Node):
         if msg.data == 10:
             acceleration_cmd = -5.0
             self.steer_change_cmd = 0.5
-            #rv23aao : Need to change this afterwards
+            # : Need to change this afterwards
             #steering_cmd = self.prev_steering
             steering_cmd = self.steer_rad
             self.publish_command(acceleration_cmd, steering_cmd)
@@ -212,17 +214,17 @@ class Control(Node):
             #self.mission_flag_pub.publish(msg)
         elif msg.data == 30:
             acceleration_cmd = -1.0
-            #rv23aao : Need to change this afterwards
+            # : Need to change this afterwards
             steering_cmd = self.steer_rad
             self.publish_command(acceleration_cmd, steering_cmd)
         elif msg.data == 40:
             acceleration_cmd = -1
-            #rv23aao : Need to change this afterwards
+            #  : Need to change this afterwards
             steering_cmd = self.steer_rad
             self.publish_command(acceleration_cmd, steering_cmd)
         elif msg.data == 90:
             acceleration_cmd = -1
-            #rv23aao : Need to change this afterwards
+            # : Need to change this afterwards
             steering_cmd = self.steer_rad
             self.publish_command(acceleration_cmd, steering_cmd)
 
@@ -285,10 +287,11 @@ class Control(Node):
         m.color.b = 1.0
         m.text = (
             f"Speed: {speed:.2f}  Range:[{self.min_speed:.1f},{self.max_speed:.1f}]\n"
-            f"Steer: {steer_deg:.1f}°\n"
+            f"Steer: {steer_deg:.6f}°\n"
             f"Accel: {accel:.2f}\n"
             f"Memory: {'ACTIVE' if self.turn_memory_active else 'OFF'}\n"
-            f"SpeedSrc: {self.speed_source}"
+            #f"SpeedSrc: {self.speed_source}\n"
+            f"PID_out: {self.last_pid_out:.6f}"
         )
         self.viz_pub.publish(m)
 
