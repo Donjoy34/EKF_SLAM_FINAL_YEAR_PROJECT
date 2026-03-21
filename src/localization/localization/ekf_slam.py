@@ -18,6 +18,7 @@ class Pose2D:
     x: float
     y: float
     yaw: float
+    v: float = 0.0
 
 
 class EkfSlam(Node):
@@ -40,6 +41,12 @@ class EkfSlam(Node):
         self.declare_parameter('enable_live_plot', True)
         self.declare_parameter('live_plot_period_sec', 0.2)
         self.declare_parameter('align_gt_plot', True)
+
+        self.declare_parameter('enable_diagnostics_plot', True)
+        self.declare_parameter('diagnostics_plot_period_sec', 0.5)
+        self.declare_parameter('diagnostics_max_points', 600)
+        self.declare_parameter('diagnostics_time_sync_sec', 0.2)
+        self.declare_parameter('diagnostics_rmse_window_sec', 10.0)
 
         self.declare_parameter('enable_loop_closure', True)
         self.declare_parameter('loop_search_radius_m', 3.5)
@@ -94,6 +101,12 @@ class EkfSlam(Node):
         self.live_plot_period_sec = float(self.get_parameter('live_plot_period_sec').value)
         self.align_gt_plot = bool(self.get_parameter('align_gt_plot').value)
 
+        self.enable_diagnostics_plot = bool(self.get_parameter('enable_diagnostics_plot').value)
+        self.diagnostics_plot_period_sec = float(self.get_parameter('diagnostics_plot_period_sec').value)
+        self.diagnostics_max_points = int(self.get_parameter('diagnostics_max_points').value)
+        self.diagnostics_time_sync_sec = float(self.get_parameter('diagnostics_time_sync_sec').value)
+        self.diagnostics_rmse_window_sec = float(self.get_parameter('diagnostics_rmse_window_sec').value)
+
         self.enable_loop_closure = bool(self.get_parameter('enable_loop_closure').value)
         self.loop_search_radius_m = float(self.get_parameter('loop_search_radius_m').value)
         self.loop_yaw_gate_rad = math.radians(float(self.get_parameter('loop_yaw_gate_deg').value))
@@ -146,6 +159,7 @@ class EkfSlam(Node):
         self.path_msg.header.frame_id = self.map_frame
         self.estimated_path: List[Pose2D] = []
         self.gt_path: List[Pose2D] = []
+        self.last_gt_pose: Optional[Pose2D] = None
         self.gt_landmarks_last: List[Tuple[float, float]] = []
         self.gt_landmarks_static: List[Tuple[float, float]] = []
 
@@ -162,6 +176,21 @@ class EkfSlam(Node):
         self.plot_align_ready = False
         self.plot_rot = np.eye(2, dtype=float)
         self.plot_trans = np.zeros((2,), dtype=float)
+
+        self.diag_fig = None
+        self.diag_axes = None
+        self.diag_ready = False
+        self.rmse_line = None
+        self.nis_line = None
+        self.nees_line = None
+        self.residual_line = None
+        self.diag_history = {
+            'rmse': [],
+            'nis': [],
+            'nees': [],
+            'residual': [],
+        }
+        self.pos_err_history: List[Tuple[float, float]] = []
 
         self.create_subscription(Imu, self.imu_topic, self.on_imu, qos_profile_sensor_data)
         self.create_subscription(ConeArrayWithCovariance, self.cone_topic, self.on_cones, qos_profile_sensor_data)
@@ -181,6 +210,11 @@ class EkfSlam(Node):
             self.setup_live_plot()
             if self.live_plot_ready:
                 self.create_timer(max(0.05, self.live_plot_period_sec), self.update_live_plot)
+
+        if self.enable_diagnostics_plot:
+            self.setup_diagnostics_plot()
+            if self.diag_ready:
+                self.create_timer(max(0.1, self.diagnostics_plot_period_sec), self.update_diagnostics_plot)
 
         self.get_logger().info('ekf_slam started (simplified EKF-SLAM)')
 
@@ -208,6 +242,75 @@ class EkfSlam(Node):
         except Exception as exc:
             self.live_plot_ready = False
             self.get_logger().warn(f'live matplotlib plotting disabled: {exc}')
+
+    def setup_diagnostics_plot(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+
+            if self.plt is None:
+                self.plt = plt
+            self.diag_fig, self.diag_axes = plt.subplots(2, 2, figsize=(11, 7))
+            ax_rmse = self.diag_axes[0, 0]
+            ax_nis = self.diag_axes[0, 1]
+            ax_nees = self.diag_axes[1, 0]
+            ax_res = self.diag_axes[1, 1]
+
+            self.rmse_line, = ax_rmse.plot([], [], 'b-', linewidth=1.6, label='RMSE (pos)')
+            self.nis_line, = ax_nis.plot([], [], 'm-', linewidth=1.4, label='NIS')
+            self.nees_line, = ax_nees.plot([], [], 'g-', linewidth=1.4, label='NEES')
+            self.residual_line, = ax_res.plot([], [], 'c-', linewidth=1.4, label='Innovation Norm')
+
+            ax_rmse.set_title('RMSE (Position)')
+            ax_nis.set_title('NIS (Measurement Consistency)')
+            ax_nees.set_title('NEES (State Consistency)')
+            ax_res.set_title('Innovation / Residual')
+
+            for ax in (ax_rmse, ax_nis, ax_nees, ax_res):
+                ax.set_xlabel('Time [s]')
+                ax.grid(True, alpha=0.3)
+                ax.legend(loc='best')
+
+            self.diag_fig.tight_layout()
+            self.diag_ready = True
+            self.plt.show(block=False)
+        except Exception as exc:
+            self.diag_ready = False
+            self.get_logger().warn(f'diagnostics plotting disabled: {exc}')
+
+    def update_diagnostics_plot(self) -> None:
+        if not self.diag_ready or self.diag_axes is None or self.diag_fig is None or self.plt is None:
+            return
+
+        def unpack(history: List[Tuple[float, float]]) -> Tuple[np.ndarray, np.ndarray]:
+            if not history:
+                return np.zeros((0,), dtype=float), np.zeros((0,), dtype=float)
+            times = np.array([h[0] for h in history], dtype=float)
+            vals = np.array([h[1] for h in history], dtype=float)
+            t0 = times[0]
+            return times - t0, vals
+
+        t_rmse, v_rmse = unpack(self.diag_history['rmse'])
+        t_nis, v_nis = unpack(self.diag_history['nis'])
+        t_nees, v_nees = unpack(self.diag_history['nees'])
+        t_res, v_res = unpack(self.diag_history['residual'])
+
+        self.rmse_line.set_data(t_rmse, v_rmse)
+        self.nis_line.set_data(t_nis, v_nis)
+        self.nees_line.set_data(t_nees, v_nees)
+        self.residual_line.set_data(t_res, v_res)
+
+        for ax, t, v in (
+            (self.diag_axes[0, 0], t_rmse, v_rmse),
+            (self.diag_axes[0, 1], t_nis, v_nis),
+            (self.diag_axes[1, 0], t_nees, v_nees),
+            (self.diag_axes[1, 1], t_res, v_res),
+        ):
+            ax.relim()
+            ax.autoscale_view()
+
+        self.diag_fig.canvas.draw_idle()
+        self.diag_fig.canvas.flush_events()
+        self.plt.pause(0.001)
 
     def update_live_plot(self) -> None:
         if not self.live_plot_ready or self.ax is None or self.fig is None or self.plt is None:
@@ -391,9 +494,9 @@ class EkfSlam(Node):
 
         self.last_wheel_speed_mps = speed_mps
         self.last_wheel_time = stamp
-        self.ekf_update_speed(speed_mps)
+        self.ekf_update_speed(speed_mps, stamp)
 
-    def ekf_update_speed(self, speed_measurement: float) -> None:
+    def ekf_update_speed(self, speed_measurement: float, stamp_sec: Optional[float] = None) -> None:
         n = self.state_dim()
         H = np.zeros((1, n), dtype=float)
         H[0, 3] = 1.0
@@ -406,6 +509,7 @@ class EkfSlam(Node):
             S_inv = np.linalg.inv(S)
         except np.linalg.LinAlgError:
             return
+        self.record_innovation(stamp_sec, y, S_inv)
         K = self.P @ H.T @ S_inv
 
         self.x = self.x + K @ y
@@ -436,6 +540,8 @@ class EkfSlam(Node):
             S_inv = np.linalg.inv(S)
         except np.linalg.LinAlgError:
             return
+        stamp = self.stamp_to_sec(msg.header.stamp.sec, msg.header.stamp.nanosec)
+        self.record_innovation(stamp, y, S_inv)
 
         K = self.P @ H.T @ S_inv
         self.x = self.x + K @ y
@@ -478,6 +584,7 @@ class EkfSlam(Node):
 
     def on_gt_odom(self, msg: Odometry) -> None:
         t = self.stamp_to_sec(msg.header.stamp.sec, msg.header.stamp.nanosec)
+        v = float(msg.twist.twist.linear.x)
         self.gt_path.append(Pose2D(
             t=t,
             x=float(msg.pose.pose.position.x),
@@ -488,7 +595,9 @@ class EkfSlam(Node):
                 msg.pose.pose.orientation.z,
                 msg.pose.pose.orientation.w,
             ),
+            v=v,
         ))
+        self.last_gt_pose = self.gt_path[-1]
 
     def init_plot_alignment(self) -> None:
         if not self.estimated_path or not self.gt_path:
@@ -757,6 +866,7 @@ class EkfSlam(Node):
         d2 = float(innovation.T @ S_inv @ innovation)
         if d2 > self.innovation_gate_chi2:
             return
+        self.record_innovation(None, innovation, S_inv)
 
         K = self.P @ H.T @ S_inv
         self.x = self.x + K @ innovation
@@ -826,8 +936,17 @@ class EkfSlam(Node):
         odom.twist.twist.linear.x = float(self.x[3, 0])
         self.odom_pub.publish(odom)
 
-        pose = Pose2D(t=stamp_sec, x=float(self.x[0, 0]), y=float(self.x[1, 0]), yaw=float(self.x[2, 0]))
+        pose = Pose2D(
+            t=stamp_sec,
+            x=float(self.x[0, 0]),
+            y=float(self.x[1, 0]),
+            yaw=float(self.x[2, 0]),
+            v=float(self.x[3, 0]),
+        )
         self.estimated_path.append(pose)
+
+        if self.enable_diagnostics_plot:
+            self.update_diagnostics_from_gt(stamp_sec)
 
         msg = PoseStamped()
         msg.header = odom.header
@@ -881,6 +1000,60 @@ class EkfSlam(Node):
         t3 = 2.0 * (w * z + x * y)
         t4 = 1.0 - 2.0 * (y * y + z * z)
         return math.atan2(t3, t4)
+
+    def record_innovation(self, stamp_sec: Optional[float], innovation: np.ndarray, s_inv: np.ndarray) -> None:
+        if not self.enable_diagnostics_plot:
+            return
+        if stamp_sec is None or stamp_sec <= 0.0:
+            stamp_sec = self.get_clock().now().nanoseconds * 1e-9
+        try:
+            nis = float(innovation.T @ s_inv @ innovation)
+        except Exception:
+            return
+        residual = float(np.linalg.norm(innovation))
+        self.append_diag('nis', stamp_sec, nis)
+        self.append_diag('residual', stamp_sec, residual)
+
+    def append_diag(self, key: str, stamp_sec: float, value: float) -> None:
+        if not math.isfinite(value):
+            return
+        history = self.diag_history.get(key)
+        if history is None:
+            return
+        history.append((stamp_sec, float(value)))
+        if len(history) > self.diagnostics_max_points:
+            del history[:-self.diagnostics_max_points]
+
+    def update_diagnostics_from_gt(self, stamp_sec: float) -> None:
+        if self.last_gt_pose is None:
+            return
+        if abs(stamp_sec - self.last_gt_pose.t) > self.diagnostics_time_sync_sec:
+            return
+
+        dx = float(self.x[0, 0]) - self.last_gt_pose.x
+        dy = float(self.x[1, 0]) - self.last_gt_pose.y
+        dyaw = self.normalize_angle(float(self.x[2, 0]) - self.last_gt_pose.yaw)
+        dv = float(self.x[3, 0]) - self.last_gt_pose.v
+
+        pos_err2 = dx * dx + dy * dy
+        self.pos_err_history.append((stamp_sec, pos_err2))
+        if len(self.pos_err_history) > self.diagnostics_max_points:
+            del self.pos_err_history[:-self.diagnostics_max_points]
+
+        window_start = stamp_sec - self.diagnostics_rmse_window_sec
+        recent = [e2 for t, e2 in self.pos_err_history if t >= window_start]
+        if recent:
+            rmse = math.sqrt(sum(recent) / float(len(recent)))
+            self.append_diag('rmse', stamp_sec, rmse)
+
+        idx = [0, 1, 2, 3]
+        p_sub = self.P[np.ix_(idx, idx)]
+        e = np.array([[dx], [dy], [dyaw], [dv]], dtype=float)
+        try:
+            nees = float(e.T @ np.linalg.inv(p_sub) @ e)
+        except np.linalg.LinAlgError:
+            return
+        self.append_diag('nees', stamp_sec, nees)
 
 
 def main() -> None:
