@@ -47,6 +47,10 @@ class EkfSlam(Node):
         self.declare_parameter('rmse_time_sync_sec', 0.2)
         self.declare_parameter('rmse_window_sec', 10.0)
         self.declare_parameter('rmse_allow_unsynced', True)
+        self.declare_parameter('gt_reset_origin_m', 0.5)
+        self.declare_parameter('gt_reset_jump_m', 5.0)
+        self.declare_parameter('enable_pose_debug_log', False)
+        self.declare_parameter('pose_debug_period_sec', 1.0)
 
         self.declare_parameter('enable_loop_closure', True)
         self.declare_parameter('loop_search_radius_m', 3.5)
@@ -58,6 +62,10 @@ class EkfSlam(Node):
         self.declare_parameter('keyframe_add_dist_m', 1.0)
         self.declare_parameter('keyframe_add_yaw_deg', 12.0)
         self.declare_parameter('keyframe_landmark_radius_m', 8.0)
+        self.declare_parameter('max_loop_pose_step_m', 0.8)
+        self.declare_parameter('max_loop_yaw_step_deg', 6.0)
+        self.declare_parameter('loop_pose_max_error_m', 2.0)
+        self.declare_parameter('loop_pose_max_error_deg', 20.0)
 
         self.declare_parameter('wheel_radius_m', 0.2525)
         self.declare_parameter('wheelbase_m', 1.6)
@@ -79,10 +87,15 @@ class EkfSlam(Node):
         self.declare_parameter('cone_meas_noise_y', 0.35)
         self.declare_parameter('association_gate_chi2', 6.0)
         self.declare_parameter('innovation_gate_chi2', 7.0)
+        self.declare_parameter('association_max_dist_m', 1.5)
         self.declare_parameter('obs_max_range_m', 20.0)
         self.declare_parameter('max_observations_per_scan', 120)
         self.declare_parameter('max_landmarks', 600)
         self.declare_parameter('landmark_min_init_range_m', 1.0)
+        self.declare_parameter('max_landmark_pose_step_m', 0.35)
+        self.declare_parameter('max_landmark_yaw_step_deg', 8.0)
+        self.declare_parameter('max_landmark_pose_step_scan_m', 0.6)
+        self.declare_parameter('max_landmark_yaw_step_scan_deg', 8.0)
 
         self.imu_topic = str(self.get_parameter('imu_topic').value)
         self.cone_topic = str(self.get_parameter('cone_topic').value)
@@ -107,6 +120,10 @@ class EkfSlam(Node):
         self.rmse_time_sync_sec = float(self.get_parameter('rmse_time_sync_sec').value)
         self.rmse_window_sec = float(self.get_parameter('rmse_window_sec').value)
         self.rmse_allow_unsynced = bool(self.get_parameter('rmse_allow_unsynced').value)
+        self.gt_reset_origin_m = float(self.get_parameter('gt_reset_origin_m').value)
+        self.gt_reset_jump_m = float(self.get_parameter('gt_reset_jump_m').value)
+        self.enable_pose_debug_log = bool(self.get_parameter('enable_pose_debug_log').value)
+        self.pose_debug_period_sec = float(self.get_parameter('pose_debug_period_sec').value)
 
         self.enable_loop_closure = bool(self.get_parameter('enable_loop_closure').value)
         self.loop_search_radius_m = float(self.get_parameter('loop_search_radius_m').value)
@@ -118,6 +135,10 @@ class EkfSlam(Node):
         self.keyframe_add_dist_m = float(self.get_parameter('keyframe_add_dist_m').value)
         self.keyframe_add_yaw_rad = math.radians(float(self.get_parameter('keyframe_add_yaw_deg').value))
         self.keyframe_landmark_radius_m = float(self.get_parameter('keyframe_landmark_radius_m').value)
+        self.max_loop_pose_step_m = float(self.get_parameter('max_loop_pose_step_m').value)
+        self.max_loop_yaw_step_rad = math.radians(float(self.get_parameter('max_loop_yaw_step_deg').value))
+        self.loop_pose_max_error_m = float(self.get_parameter('loop_pose_max_error_m').value)
+        self.loop_pose_max_error_rad = math.radians(float(self.get_parameter('loop_pose_max_error_deg').value))
 
         self.wheel_radius_m = float(self.get_parameter('wheel_radius_m').value)
         self.wheelbase_m = float(self.get_parameter('wheelbase_m').value)
@@ -139,10 +160,15 @@ class EkfSlam(Node):
         self.cone_meas_noise_y = float(self.get_parameter('cone_meas_noise_y').value)
         self.association_gate_chi2 = float(self.get_parameter('association_gate_chi2').value)
         self.innovation_gate_chi2 = float(self.get_parameter('innovation_gate_chi2').value)
+        self.association_max_dist_m = float(self.get_parameter('association_max_dist_m').value)
         self.obs_max_range_m = float(self.get_parameter('obs_max_range_m').value)
         self.max_observations_per_scan = int(self.get_parameter('max_observations_per_scan').value)
         self.max_landmarks = int(self.get_parameter('max_landmarks').value)
         self.landmark_min_init_range_m = float(self.get_parameter('landmark_min_init_range_m').value)
+        self.max_landmark_pose_step_m = float(self.get_parameter('max_landmark_pose_step_m').value)
+        self.max_landmark_yaw_step_rad = math.radians(float(self.get_parameter('max_landmark_yaw_step_deg').value))
+        self.max_landmark_pose_step_scan_m = float(self.get_parameter('max_landmark_pose_step_scan_m').value)
+        self.max_landmark_yaw_step_scan_rad = math.radians(float(self.get_parameter('max_landmark_yaw_step_scan_deg').value))
 
         self.base_dim = 5
         self.x = np.zeros((self.base_dim, 1), dtype=float)
@@ -184,6 +210,7 @@ class EkfSlam(Node):
         self.rmse_ready = False
         self.rmse_history: List[Tuple[float, float]] = []
         self.pos_err_history: List[Tuple[float, float]] = []
+        self.last_pose_debug_time = -1e9
 
         self.create_subscription(Imu, self.imu_topic, self.on_imu, qos_profile_sensor_data)
         self.create_subscription(ConeArrayWithCovariance, self.cone_topic, self.on_cones, qos_profile_sensor_data)
@@ -261,16 +288,19 @@ class EkfSlam(Node):
             return
         if not self.rmse_history:
             return
-
-        times = np.array([t for t, _ in self.rmse_history], dtype=float)
-        vals = np.array([v for _, v in self.rmse_history], dtype=float)
-        t0 = times[0]
-        self.rmse_line.set_data(times - t0, vals)
-        self.rmse_ax.relim()
-        self.rmse_ax.autoscale_view()
-        self.rmse_fig.canvas.draw_idle()
-        self.rmse_fig.canvas.flush_events()
-        self.plt.pause(0.001)
+        try:
+            times = np.array([t for t, _ in self.rmse_history], dtype=float)
+            vals = np.array([v for _, v in self.rmse_history], dtype=float)
+            t0 = times[0]
+            self.rmse_line.set_data(times - t0, vals)
+            self.rmse_ax.relim()
+            self.rmse_ax.autoscale_view()
+            self.rmse_fig.canvas.draw_idle()
+            self.rmse_fig.canvas.flush_events()
+            self.plt.pause(0.001)
+        except Exception as exc:
+            self.rmse_ready = False
+            self.get_logger().warn(f'rmse plot disabled after error: {exc}')
 
     def update_live_plot(self) -> None:
         if not self.live_plot_ready or self.ax is None or self.fig is None or self.plt is None:
@@ -278,58 +308,62 @@ class EkfSlam(Node):
         if len(self.estimated_path) < 2:
             return
 
-        if self.align_gt_plot and self.gt_path and not self.plot_align_ready:
-            self.init_plot_alignment()
+        try:
+            if self.align_gt_plot and self.gt_path and not self.plot_align_ready:
+                self.init_plot_alignment()
 
-        est_xy = np.array([(p.x, p.y) for p in self.estimated_path], dtype=float)
-        gt_xy = np.array([(p.x, p.y) for p in self.gt_path], dtype=float) if self.gt_path else np.zeros((0, 2), dtype=float)
-        pred_landmarks = self.get_predicted_landmarks()
+            est_xy = np.array([(p.x, p.y) for p in self.estimated_path], dtype=float)
+            gt_xy = np.array([(p.x, p.y) for p in self.gt_path], dtype=float) if self.gt_path else np.zeros((0, 2), dtype=float)
+            pred_landmarks = self.get_predicted_landmarks()
 
-        if self.align_gt_plot and self.plot_align_ready:
-            gt_xy = self.align_points(gt_xy)
-            pred_gt_landmarks = (
-                self.align_points(np.array(self.gt_landmarks_static, dtype=float))
-                if self.gt_landmarks_static
-                else None
-            )
-        else:
-            pred_gt_landmarks = np.array(self.gt_landmarks_static, dtype=float) if self.gt_landmarks_static else None
-
-        self.est_line.set_data(est_xy[:, 0], est_xy[:, 1])
-        if gt_xy.shape[0] > 1:
-            self.gt_line.set_data(gt_xy[:, 0], gt_xy[:, 1])
-        else:
-            self.gt_line.set_data([], [])
-
-        if pred_landmarks.shape[0] > 0:
-            self.pred_landmark_scatter.set_offsets(pred_landmarks)
-        else:
-            self.pred_landmark_scatter.set_offsets(np.empty((0, 2), dtype=float))
-
-        if pred_gt_landmarks is not None and pred_gt_landmarks.size > 0:
-            self.gt_landmark_scatter.set_offsets(pred_gt_landmarks)
-        else:
-            self.gt_landmark_scatter.set_offsets(np.empty((0, 2), dtype=float))
-
-        est_pose = self.estimated_path[-1]
-        est_tri = self.car_triangle(est_pose.x, est_pose.y, est_pose.yaw)
-        self.est_car_line.set_data(est_tri[:, 0], est_tri[:, 1])
-
-        if self.gt_path:
-            gt_pose = self.gt_path[-1]
             if self.align_gt_plot and self.plot_align_ready:
-                gt_pose = self.align_pose(gt_pose)
-            gt_tri = self.car_triangle(gt_pose.x, gt_pose.y, gt_pose.yaw)
-            self.gt_car_line.set_data(gt_tri[:, 0], gt_tri[:, 1])
-        else:
-            self.gt_car_line.set_data([], [])
+                gt_xy = self.align_points(gt_xy)
+                pred_gt_landmarks = (
+                    self.align_points(np.array(self.gt_landmarks_static, dtype=float))
+                    if self.gt_landmarks_static
+                    else None
+                )
+            else:
+                pred_gt_landmarks = np.array(self.gt_landmarks_static, dtype=float) if self.gt_landmarks_static else None
 
-        self.ax.relim()
-        self.ax.autoscale_view()
-        self.ax.set_aspect('equal', adjustable='box')
-        self.fig.canvas.draw_idle()
-        self.fig.canvas.flush_events()
-        self.plt.pause(0.001)
+            self.est_line.set_data(est_xy[:, 0], est_xy[:, 1])
+            if gt_xy.shape[0] > 1:
+                self.gt_line.set_data(gt_xy[:, 0], gt_xy[:, 1])
+            else:
+                self.gt_line.set_data([], [])
+
+            if pred_landmarks.shape[0] > 0:
+                self.pred_landmark_scatter.set_offsets(pred_landmarks)
+            else:
+                self.pred_landmark_scatter.set_offsets(np.empty((0, 2), dtype=float))
+
+            if pred_gt_landmarks is not None and pred_gt_landmarks.size > 0:
+                self.gt_landmark_scatter.set_offsets(pred_gt_landmarks)
+            else:
+                self.gt_landmark_scatter.set_offsets(np.empty((0, 2), dtype=float))
+
+            est_pose = self.estimated_path[-1]
+            est_tri = self.car_triangle(est_pose.x, est_pose.y, est_pose.yaw)
+            self.est_car_line.set_data(est_tri[:, 0], est_tri[:, 1])
+
+            if self.gt_path:
+                gt_pose = self.gt_path[-1]
+                if self.align_gt_plot and self.plot_align_ready:
+                    gt_pose = self.align_pose(gt_pose)
+                gt_tri = self.car_triangle(gt_pose.x, gt_pose.y, gt_pose.yaw)
+                self.gt_car_line.set_data(gt_tri[:, 0], gt_tri[:, 1])
+            else:
+                self.gt_car_line.set_data([], [])
+
+            self.ax.relim()
+            self.ax.autoscale_view()
+            self.ax.set_aspect('equal', adjustable='box')
+            self.fig.canvas.draw_idle()
+            self.fig.canvas.flush_events()
+            self.plt.pause(0.001)
+        except Exception as exc:
+            self.live_plot_ready = False
+            self.get_logger().warn(f'live plot disabled after error: {exc}')
 
     def state_dim(self) -> int:
         return self.x.shape[0]
@@ -370,33 +404,30 @@ class EkfSlam(Node):
         omega_z = float(msg.angular_velocity.z) - b_g
         accel_x = float(msg.linear_acceleration.x)
 
-        wheel_fresh = False
-        if self.last_wheel_time is not None:
-            wheel_fresh = abs(stamp - self.last_wheel_time) <= self.wheel_speed_timeout_sec
-        v_wheel = self.last_wheel_speed_mps if wheel_fresh else v
-
         if self.use_imu_accel_prediction:
             v_pred = v + accel_x * dt
         else:
-            v_pred = v_wheel
-
-        v_used = v_wheel if wheel_fresh else v_pred
+            v_pred = v
 
         c_yaw = math.cos(yaw)
         s_yaw = math.sin(yaw)
         if self.use_imu_accel_prediction:
-            px_new = float(self.x[0, 0]) + v_used * c_yaw * dt + 0.5 * accel_x * c_yaw * dt * dt
-            py_new = float(self.x[1, 0]) + v_used * s_yaw * dt + 0.5 * accel_x * s_yaw * dt * dt
+            px_new = float(self.x[0, 0]) + v * c_yaw * dt + 0.5 * accel_x * c_yaw * dt * dt
+            py_new = float(self.x[1, 0]) + v * s_yaw * dt + 0.5 * accel_x * s_yaw * dt * dt
         else:
-            px_new = float(self.x[0, 0]) + v_used * c_yaw * dt
-            py_new = float(self.x[1, 0]) + v_used * s_yaw * dt
+            px_new = float(self.x[0, 0]) + v * c_yaw * dt
+            py_new = float(self.x[1, 0]) + v * s_yaw * dt
         yaw_new = self.normalize_angle(yaw + omega_z * dt)
         v_new = v_pred
 
         n = self.state_dim()
         F = np.eye(n, dtype=float)
-        F[0, 2] = -v_used * s_yaw * dt
-        F[1, 2] = v_used * c_yaw * dt
+        if self.use_imu_accel_prediction:
+            F[0, 2] = -v * s_yaw * dt - 0.5 * accel_x * s_yaw * dt * dt
+            F[1, 2] = v * c_yaw * dt + 0.5 * accel_x * c_yaw * dt * dt
+        else:
+            F[0, 2] = -v * s_yaw * dt
+            F[1, 2] = v * c_yaw * dt
         F[0, 3] = c_yaw * dt
         F[1, 3] = s_yaw * dt
         F[2, 4] = -dt
@@ -501,7 +532,21 @@ class EkfSlam(Node):
             return
 
         K = self.P @ H.T @ S_inv
-        self.x = self.x + K @ y
+        delta = K @ y
+        scale = 1.0
+        if self.max_loop_pose_step_m > 0.0:
+            step_xy = math.hypot(float(delta[0, 0]), float(delta[1, 0]))
+            if step_xy > self.max_loop_pose_step_m:
+                scale = min(scale, self.max_loop_pose_step_m / step_xy)
+        if self.max_loop_yaw_step_rad > 0.0:
+            step_yaw = abs(float(delta[2, 0]))
+            if step_yaw > self.max_loop_yaw_step_rad:
+                scale = min(scale, self.max_loop_yaw_step_rad / step_yaw)
+        if scale < 1.0:
+            K = K * scale
+            delta = K @ y
+
+        self.x = self.x + delta
         self.x[2, 0] = self.normalize_angle(float(self.x[2, 0]))
 
         I = np.eye(n)
@@ -519,8 +564,12 @@ class EkfSlam(Node):
         used_landmarks: Set[int] = set()
         processed = 0
         matched_indices: List[int] = []
+        remaining_pose = self.max_landmark_pose_step_scan_m if self.max_landmark_pose_step_scan_m > 0.0 else float('inf')
+        remaining_yaw = self.max_landmark_yaw_step_scan_rad if self.max_landmark_yaw_step_scan_rad > 0.0 else float('inf')
         for zx, zy, R in observations:
             if processed >= self.max_observations_per_scan:
+                break
+            if remaining_pose <= 0.0 and remaining_yaw <= 0.0:
                 break
             obs_range = math.hypot(zx, zy)
             if obs_range > self.obs_max_range_m:
@@ -531,7 +580,16 @@ class EkfSlam(Node):
                 if self.landmark_count() < self.max_landmarks and obs_range >= self.landmark_min_init_range_m:
                     self.augment_landmark(zx, zy, R)
             else:
-                self.ekf_update_landmark(lm_index, zx, zy, R)
+                used_xy, used_yaw = self.ekf_update_landmark(
+                    lm_index,
+                    zx,
+                    zy,
+                    R,
+                    remaining_pose,
+                    remaining_yaw,
+                )
+                remaining_pose = max(0.0, remaining_pose - used_xy)
+                remaining_yaw = max(0.0, remaining_yaw - used_yaw)
                 used_landmarks.add(lm_index)
                 matched_indices.append(lm_index)
             processed += 1
@@ -541,7 +599,7 @@ class EkfSlam(Node):
 
     def on_gt_odom(self, msg: Odometry) -> None:
         t = self.stamp_to_sec(msg.header.stamp.sec, msg.header.stamp.nanosec)
-        self.gt_path.append(Pose2D(
+        gt_pose = Pose2D(
             t=t,
             x=float(msg.pose.pose.position.x),
             y=float(msg.pose.pose.position.y),
@@ -551,7 +609,16 @@ class EkfSlam(Node):
                 msg.pose.pose.orientation.z,
                 msg.pose.pose.orientation.w,
             ),
-        ))
+        )
+        if self.last_gt_pose is not None:
+            last_norm = math.hypot(self.last_gt_pose.x, self.last_gt_pose.y)
+            new_norm = math.hypot(gt_pose.x, gt_pose.y)
+            if new_norm <= self.gt_reset_origin_m and last_norm >= self.gt_reset_jump_m:
+                self.gt_path = []
+                self.plot_align_ready = False
+                self.pos_err_history = []
+                self.rmse_history = []
+        self.gt_path.append(gt_pose)
         self.last_gt_pose = self.gt_path[-1]
 
     def init_plot_alignment(self) -> None:
@@ -708,6 +775,13 @@ class EkfSlam(Node):
         y = z - h
         y[2, 0] = self.normalize_angle(float(y[2, 0]))
 
+        raw_step_xy = math.hypot(float(y[0, 0]), float(y[1, 0]))
+        raw_step_yaw = abs(float(y[2, 0]))
+        if self.loop_pose_max_error_m > 0.0 and raw_step_xy > self.loop_pose_max_error_m:
+            return
+        if self.loop_pose_max_error_rad > 0.0 and raw_step_yaw > self.loop_pose_max_error_rad:
+            return
+
         R = np.diag([
             self.loop_pose_noise_xy ** 2,
             self.loop_pose_noise_xy ** 2,
@@ -735,9 +809,21 @@ class EkfSlam(Node):
                 zx = float(cone.point.x)
                 zy = float(cone.point.y)
                 c = cone.covariance
-                r_x = max(self.cone_meas_noise_x ** 2, float(c[0]) if len(c) > 0 else self.cone_meas_noise_x ** 2)
-                r_y = max(self.cone_meas_noise_y ** 2, float(c[3]) if len(c) > 3 else self.cone_meas_noise_y ** 2)
-                R = np.diag([r_x, r_y])
+                if len(c) >= 4:
+                    R = np.array(
+                        [[float(c[0]), float(c[1])], [float(c[2]), float(c[3])]],
+                        dtype=float,
+                    )
+                    R = 0.5 * (R + R.T)
+                    if np.all(np.isfinite(R)):
+                        eigvals, eigvecs = np.linalg.eigh(R)
+                        min_eig = min(self.cone_meas_noise_x ** 2, self.cone_meas_noise_y ** 2)
+                        eigvals = np.maximum(eigvals, min_eig)
+                        R = eigvecs @ np.diag(eigvals) @ eigvecs.T
+                    else:
+                        R = np.diag([self.cone_meas_noise_x ** 2, self.cone_meas_noise_y ** 2])
+                else:
+                    R = np.diag([self.cone_meas_noise_x ** 2, self.cone_meas_noise_y ** 2])
                 observations.append((zx, zy, R))
 
         append_group(msg.blue_cones)
@@ -761,8 +847,24 @@ class EkfSlam(Node):
         best_d2 = float('inf')
         z = np.array([[zx], [zy]], dtype=float)
 
+        px = float(self.x[0, 0])
+        py = float(self.x[1, 0])
+        yaw = float(self.x[2, 0])
+        c = math.cos(yaw)
+        s = math.sin(yaw)
+        meas_lx = px + c * zx - s * zy
+        meas_ly = py + s * zx + c * zy
+        max_dist2 = self.association_max_dist_m * self.association_max_dist_m
+
         for idx in range(landmark_count):
             if used_landmarks is not None and idx in used_landmarks:
+                continue
+            sl = self.landmark_slice(idx)
+            lx = float(self.x[sl.start, 0])
+            ly = float(self.x[sl.start + 1, 0])
+            dx = lx - meas_lx
+            dy = ly - meas_ly
+            if max_dist2 > 0.0 and (dx * dx + dy * dy) > max_dist2:
                 continue
             zhat, H = self.predict_landmark_measurement(idx)
             innovation = z - zhat
@@ -808,7 +910,15 @@ class EkfSlam(Node):
         H[1, sl.start + 1] = c
         return zhat, H
 
-    def ekf_update_landmark(self, landmark_index: int, zx: float, zy: float, R: np.ndarray) -> None:
+    def ekf_update_landmark(
+        self,
+        landmark_index: int,
+        zx: float,
+        zy: float,
+        R: np.ndarray,
+        pose_budget_m: float = float('inf'),
+        yaw_budget_rad: float = float('inf'),
+    ) -> Tuple[float, float]:
         z = np.array([[zx], [zy]], dtype=float)
         zhat, H = self.predict_landmark_measurement(landmark_index)
         innovation = z - zhat
@@ -816,20 +926,44 @@ class EkfSlam(Node):
         try:
             S_inv = np.linalg.inv(S)
         except np.linalg.LinAlgError:
-            return
+            return 0.0, 0.0
 
         d2 = float(innovation.T @ S_inv @ innovation)
         if d2 > self.innovation_gate_chi2:
-            return
+            return 0.0, 0.0
 
         K = self.P @ H.T @ S_inv
-        self.x = self.x + K @ innovation
+        delta = K @ innovation
+        scale = 1.0
+        max_pose_step = self.max_landmark_pose_step_m
+        if math.isfinite(pose_budget_m):
+            max_pose_step = min(max_pose_step, pose_budget_m)
+        if max_pose_step > 0.0:
+            step_xy = math.hypot(float(delta[0, 0]), float(delta[1, 0]))
+            if step_xy > max_pose_step:
+                scale = min(scale, max_pose_step / step_xy)
+        max_yaw_step = self.max_landmark_yaw_step_rad
+        if math.isfinite(yaw_budget_rad):
+            max_yaw_step = min(max_yaw_step, yaw_budget_rad)
+        if max_yaw_step > 0.0:
+            step_yaw = abs(float(delta[2, 0]))
+            if step_yaw > max_yaw_step:
+                scale = min(scale, max_yaw_step / step_yaw)
+        if scale < 1.0:
+            K = K * scale
+            delta = K @ innovation
+
+        self.x = self.x + delta
         self.x[2, 0] = self.normalize_angle(float(self.x[2, 0]))
 
         n = self.state_dim()
         I = np.eye(n)
         self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R @ K.T
         self.P = 0.5 * (self.P + self.P.T)
+        return (
+            math.hypot(float(delta[0, 0]), float(delta[1, 0])),
+            abs(float(delta[2, 0])),
+        )
 
     def augment_landmark(self, zx: float, zy: float, R: np.ndarray) -> None:
         yaw = float(self.x[2, 0])
@@ -896,6 +1030,22 @@ class EkfSlam(Node):
         if self.enable_rmse_plot:
             self.update_rmse_from_gt(stamp_sec)
 
+        if self.enable_pose_debug_log and self.last_gt_pose is not None:
+            if stamp_sec - self.last_pose_debug_time >= self.pose_debug_period_sec:
+                self.last_pose_debug_time = stamp_sec
+                if self.align_gt_plot and self.plot_align_ready:
+                    gt_pose = self.align_pose(self.last_gt_pose)
+                else:
+                    gt_pose = self.last_gt_pose
+                dx = float(self.x[0, 0]) - gt_pose.x
+                dy = float(self.x[1, 0]) - gt_pose.y
+                dyaw = self.normalize_angle(float(self.x[2, 0]) - gt_pose.yaw)
+                self.get_logger().info(
+                    f'pose_delta: ekf=({float(self.x[0, 0]):.2f},{float(self.x[1, 0]):.2f},{float(self.x[2, 0]):.2f}) '
+                    f'gt=({gt_pose.x:.2f},{gt_pose.y:.2f},{gt_pose.yaw:.2f}) '
+                    f'd=({dx:.2f},{dy:.2f},{dyaw:.2f})'
+                )
+
         msg = PoseStamped()
         msg.header = odom.header
         msg.pose = odom.pose.pose
@@ -956,8 +1106,18 @@ class EkfSlam(Node):
             if not self.rmse_allow_unsynced:
                 return
 
-        dx = float(self.x[0, 0]) - self.last_gt_pose.x
-        dy = float(self.x[1, 0]) - self.last_gt_pose.y
+        if self.align_gt_plot:
+            if not self.plot_align_ready and self.estimated_path and self.gt_path:
+                self.init_plot_alignment()
+            if self.plot_align_ready:
+                gt_pose = self.align_pose(self.last_gt_pose)
+            else:
+                gt_pose = self.last_gt_pose
+        else:
+            gt_pose = self.last_gt_pose
+
+        dx = float(self.x[0, 0]) - gt_pose.x
+        dy = float(self.x[1, 0]) - gt_pose.y
         pos_err2 = dx * dx + dy * dy
         self.pos_err_history.append((stamp_sec, pos_err2))
         if len(self.pos_err_history) > self.rmse_max_points:
