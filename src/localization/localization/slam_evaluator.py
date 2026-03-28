@@ -50,6 +50,7 @@ class SlamEvaluator(Node):
         self.create_subscription(MarkerArray, self.landmark_topic, self.on_landmarks, 10)
         self.export_srv = self.create_service(Trigger, '/slam_eval/export', self.on_export)
 
+
         self.get_logger().info('slam_evaluator active: collecting slam/gt trajectories and landmarks')
 
     def on_slam_odom(self, msg: Odometry) -> None:
@@ -89,6 +90,7 @@ class SlamEvaluator(Node):
                 points.append((float(marker.pose.position.x), float(marker.pose.position.y)))
         if points:
             self.landmarks_xy = points
+
 
     def on_export(self, request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
         del request

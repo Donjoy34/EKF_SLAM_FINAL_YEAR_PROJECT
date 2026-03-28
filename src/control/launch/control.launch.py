@@ -39,7 +39,7 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(DeclareLaunchArgument('static_lookahead_idx', default_value='6'))
     ld.add_action(DeclareLaunchArgument('min_speed', default_value='0.5'))
-    ld.add_action(DeclareLaunchArgument('max_speed', default_value='3.0'))
+    ld.add_action(DeclareLaunchArgument('max_speed', default_value='1.0'))
     ld.add_action(DeclareLaunchArgument('Kp_acc', default_value='0.8'))
     ld.add_action(DeclareLaunchArgument('Ki_acc', default_value='0.01'))
     ld.add_action(DeclareLaunchArgument('Kd_acc', default_value='0.2'))

@@ -7,6 +7,7 @@ import math
 import numpy as np
 from std_msgs.msg import Int16
 from std_msgs.msg import Bool
+from rcl_interfaces.msg import SetParametersResult
 
 
 
@@ -55,7 +56,7 @@ class Control(Node):
         # Parameters
         self.declare_parameter("static_lookahead_idx", 6)
         self.declare_parameter("min_speed", 0.5)
-        self.declare_parameter("max_speed", 3.0)
+        self.declare_parameter("max_speed", 1.0)
         self.declare_parameter("Kp_acc", 80.0)
         self.declare_parameter("Ki_acc", 11.0)
         self.declare_parameter("Kd_acc", 0.0)
@@ -76,6 +77,8 @@ class Control(Node):
         self._steer_lim = self.get_parameter("steer_limit_deg").value
         self._steer_cap = self.get_parameter("steer_cap_deg").value
         self.steer_sensor_in_rad = bool(self.get_parameter("steer_sensor_in_rad").value)
+
+        self.add_on_set_parameters_callback(self.on_params_update)
 
         self.mission_completed_pub = self.create_publisher(Bool,"/ros_can/mission_completed",1)
         self.driving_flag_pub = self.create_publisher(Bool,"/state_machine/driving_flag",1)
@@ -132,6 +135,18 @@ class Control(Node):
         self.speed = abs(float(msg.twist.twist.linear.x))
         self.last_speed_update_ns = self.get_clock().now().nanoseconds
         self.speed_source = "GROUND_TRUTH"
+
+    def on_params_update(self, params):
+        for param in params:
+            if param.name == "min_speed":
+                self.min_speed = float(param.value)
+            elif param.name == "max_speed":
+                self.max_speed = float(param.value)
+            elif param.name == "steer_limit_deg":
+                self._steer_lim = float(param.value)
+            elif param.name == "steer_cap_deg":
+                self._steer_cap = float(param.value)
+        return SetParametersResult(successful=True)
 
     def path_callback(self, msg: WaypointArrayStamped):
         # dt for PID
