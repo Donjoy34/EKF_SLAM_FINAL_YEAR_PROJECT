@@ -244,7 +244,7 @@ class EkfSlam(Node):
                 self.plt = plt
             self.rmse_fig, self.rmse_ax = plt.subplots(figsize=(7.5, 4.5))
             self.rmse_line, = self.rmse_ax.plot([], [], 'b-', linewidth=1.6, label='RMSE (pos)')
-            self.rmse_ax.set_title('EKF Position RMSE vs GT')
+            self.rmse_ax.set_title('EKF Position vs GT RMSE')
             self.rmse_ax.set_xlabel('Time [s]')
             self.rmse_ax.set_ylabel('RMSE [m]')
             self.rmse_ax.grid(True, alpha=0.3)

@@ -55,10 +55,14 @@ class Control(Node):
         # Parameters
         self.declare_parameter("static_lookahead_idx", 6)
         self.declare_parameter("min_speed", 0.5)
-        self.declare_parameter("max_speed", 1.0)
-        self.declare_parameter("Kp_acc", 0.00)
-        self.declare_parameter("Ki_acc", 0.00)
-        self.declare_parameter("Kd_acc", 0.00)
+        self.declare_parameter("max_speed", 3.0)
+        self.declare_parameter("Kp_acc", 80.0)
+        self.declare_parameter("Ki_acc", 11.0)
+        self.declare_parameter("Kd_acc", 0.0)
+        self.declare_parameter("Kp_steer", 0.0)
+        self.declare_parameter("Ki_steer", 0.0)
+        self.declare_parameter("Kd_steer", 0.0)
+        self.declare_parameter("steer_sensor_in_rad", True)
         self.declare_parameter("wheel_radius_m", 0.2525)
         self.declare_parameter("speed_timeout_sec", 0.5)
         # ±60° steering limit, back off at ±59°
@@ -71,6 +75,7 @@ class Control(Node):
         self.speed_timeout_sec = self.get_parameter("speed_timeout_sec").value
         self._steer_lim = self.get_parameter("steer_limit_deg").value
         self._steer_cap = self.get_parameter("steer_cap_deg").value
+        self.steer_sensor_in_rad = bool(self.get_parameter("steer_sensor_in_rad").value)
 
         self.mission_completed_pub = self.create_publisher(Bool,"/ros_can/mission_completed",1)
         self.driving_flag_pub = self.create_publisher(Bool,"/state_machine/driving_flag",1)
@@ -82,6 +87,18 @@ class Control(Node):
         Kd = self.get_parameter("Kd_acc").value
         self.steer_pid = PIDController(Kp, Ki, Kd,
                                        output_min=0.0, output_max=1.0)
+
+        # PID for steering correction (deg), using desired vs actual steering angle
+        Kp_steer = self.get_parameter("Kp_steer").value
+        Ki_steer = self.get_parameter("Ki_steer").value
+        Kd_steer = self.get_parameter("Kd_steer").value
+        self.steer_angle_pid = PIDController(
+            Kp_steer,
+            Ki_steer,
+            Kd_steer,
+            output_min=-float(self._steer_cap),
+            output_max=float(self._steer_cap),
+        )
 
         # ROS interfaces
         self.create_subscription(WaypointArrayStamped, "/trajectory", self.path_callback, 1)
@@ -144,14 +161,21 @@ class Control(Node):
                     raw_deg = math.copysign(self._steer_cap, raw_deg)
                     break
 
-        self.steer_rad = math.radians(raw_deg)
+        actual_steer_deg = self.ws_can_steering
+        if self.steer_sensor_in_rad:
+            actual_steer_deg = math.degrees(actual_steer_deg)
+        steer_error = raw_deg - actual_steer_deg
+        steer_correction = self.steer_angle_pid.update(steer_error, dt)
+        steer_cmd_deg = raw_deg + steer_correction
+        steer_cmd_deg = max(-self._steer_cap, min(self._steer_cap, steer_cmd_deg))
+        self.steer_rad = math.radians(steer_cmd_deg)
 
         # PID on steering magnitude (target 0°) → pid_out∈[0,1]
         pid_out = self.steer_pid.update(abs(raw_deg), dt)
         self.last_pid_out = float(pid_out)
 
         # Map pid_out to accel in [–2, +1]: 0→+1, 1→–2
-        accel_cmd = 1.0 - 3.0 * pid_out
+        accel_cmd = 1.0 - 0.1 * pid_out
         accel_cmd = max(-1.0, min(1.0, accel_cmd))
 
         #Enforce speed window [min, max]
@@ -170,7 +194,7 @@ class Control(Node):
 
         # Publish drive & viz
         self.publish_command(accel_cmd, float(self.steer_rad))
-        self.publish_visualisation(accel_cmd, raw_deg,self.speed)
+        self.publish_visualisation(accel_cmd, steer_cmd_deg, self.speed)
         self.publish_static_lookahead_marker(look_wp)
     def can_state_callback(self, msg):
         # self.get_logger().info("---------->  self.as_state:" + str(msg.as_state))

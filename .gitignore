@@ -2,3 +2,6 @@ __pycache__/
 build/
 install/
 log/
+report.tex
+report_info.tex
+report_info.tex
