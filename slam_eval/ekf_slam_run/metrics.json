@@ -1,0 +1,12 @@
+{
+  "samples": 656,
+  "duration_sec": 209.7909999989988,
+  "path_length_slam_m": 100.96458515549527,
+  "path_length_gt_m": 101.90766015582288,
+  "ate_rmse_m": 0.739577362250238,
+  "position_mae_m": 0.6862685987754795,
+  "position_max_m": 1.2490726261317684,
+  "yaw_rmse_deg": 0.46215391778724696,
+  "rpe_trans_rmse_m": 0.2386493297909335,
+  "rpe_yaw_rmse_deg": 0.3971735499107985
+}

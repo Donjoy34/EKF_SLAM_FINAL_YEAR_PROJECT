@@ -21,6 +21,9 @@ class Planner(Node):
 
         # Declare ROS parameters
         self.threshold = self.declare_parameter("threshold", 6.0).value
+        self.declare_parameter("bezier", True)
+        self.declare_parameter("bezeire", True)
+        self.declare_parameter("interpolation", True)
 
         # Create subscribers
         self.cones_sub = self.create_subscription(ConeArrayWithCovariance, "/cones", self.cones_callback, 1)
@@ -92,7 +95,10 @@ class Planner(Node):
         if midpoints:
             self.update_turn_memory_from_midpoints(midpoints)
             path_points = [[0.0, 0.0], [3.0, 0.0]] + midpoints
-            path_points = self.to_bezier(path_points, 0.5)
+            use_bezier = bool(self.get_parameter("bezier").value) and bool(self.get_parameter("bezeire").value)
+            use_interp = bool(self.get_parameter("interpolation").value)
+            if use_bezier and use_interp:
+                path_points = self.to_bezier(path_points, 0.5)
             memory_msg.data = False
         else:
             path_points = self.get_turn_memory_path()

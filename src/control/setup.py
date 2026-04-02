@@ -21,7 +21,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'control_node = control.control_node:main'
+            'control_node = control.control_node:main',
+            'pid_eval = control.pid_eval:main'
         ],
     },
 )

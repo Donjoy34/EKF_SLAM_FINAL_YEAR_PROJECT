@@ -10,6 +10,7 @@ from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
+from std_msgs.msg import Float64MultiArray
 
 
 @dataclass
@@ -34,6 +35,8 @@ class EkfSlam(Node):
         self.declare_parameter('gt_track_topic', '/ground_truth/track')
         self.declare_parameter('odom_topic', '/ekf_slam/odom')
         self.declare_parameter('path_topic', '/ekf_slam/path')
+        self.declare_parameter('innovation_topic', '/ekf_slam/innovations')
+        self.declare_parameter('publish_innovations', True)
         self.declare_parameter('map_frame', 'map')
         self.declare_parameter('base_frame', 'base_footprint')
 
@@ -107,6 +110,8 @@ class EkfSlam(Node):
         self.gt_track_topic = str(self.get_parameter('gt_track_topic').value)
         self.odom_topic = str(self.get_parameter('odom_topic').value)
         self.path_topic = str(self.get_parameter('path_topic').value)
+        self.innovation_topic = str(self.get_parameter('innovation_topic').value)
+        self.publish_innovations = bool(self.get_parameter('publish_innovations').value)
         self.map_frame = str(self.get_parameter('map_frame').value)
         self.base_frame = str(self.get_parameter('base_frame').value)
 
@@ -181,6 +186,7 @@ class EkfSlam(Node):
         self.filter_ready = False
         self.last_loop_time = -1e9
         self.keyframes: List[dict] = []
+        self.last_update_stamp_sec: Optional[float] = None
 
         self.path_msg = Path()
         self.path_msg.header.frame_id = self.map_frame
@@ -225,6 +231,7 @@ class EkfSlam(Node):
 
         self.odom_pub = self.create_publisher(Odometry, self.odom_topic, 20)
         self.path_pub = self.create_publisher(Path, self.path_topic, 10)
+        self.innov_pub = self.create_publisher(Float64MultiArray, self.innovation_topic, 50)
 
         if self.enable_live_plot:
             self.setup_live_plot()
@@ -379,6 +386,7 @@ class EkfSlam(Node):
         stamp = self.stamp_to_sec(msg.header.stamp.sec, msg.header.stamp.nanosec)
         if stamp <= 0.0:
             stamp = self.get_clock().now().nanoseconds * 1e-9
+        self.last_update_stamp_sec = stamp
 
         if self.last_imu_time is None:
             self.last_imu_time = stamp
@@ -466,6 +474,7 @@ class EkfSlam(Node):
 
         if stamp is None:
             stamp = self.get_clock().now().nanoseconds * 1e-9
+        self.last_update_stamp_sec = stamp
         self.last_steering_rad = float(msg.steering)
 
         wheel_rpms = [
@@ -500,6 +509,7 @@ class EkfSlam(Node):
             S_inv = np.linalg.inv(S)
         except np.linalg.LinAlgError:
             return
+        self.publish_innovation(1, y, S)
         K = self.P @ H.T @ S_inv
 
         self.x = self.x + K @ y
@@ -530,6 +540,7 @@ class EkfSlam(Node):
             S_inv = np.linalg.inv(S)
         except np.linalg.LinAlgError:
             return
+        self.publish_innovation(2, y, S)
 
         K = self.P @ H.T @ S_inv
         delta = K @ y
@@ -556,6 +567,8 @@ class EkfSlam(Node):
     def on_cones(self, msg: ConeArrayWithCovariance) -> None:
         if not self.filter_ready:
             return
+
+        self.last_update_stamp_sec = self.get_clock().now().nanoseconds * 1e-9
 
         observations = self.build_cone_observations(msg)
         if not observations:
@@ -793,6 +806,7 @@ class EkfSlam(Node):
             K = self.P @ H.T @ np.linalg.inv(S)
         except np.linalg.LinAlgError:
             return
+        self.publish_innovation(4, y, S)
 
         self.x = self.x + K @ y
         self.x[2, 0] = self.normalize_angle(float(self.x[2, 0]))
@@ -928,6 +942,8 @@ class EkfSlam(Node):
         except np.linalg.LinAlgError:
             return 0.0, 0.0
 
+        self.publish_innovation(3, innovation, S)
+
         d2 = float(innovation.T @ S_inv @ innovation)
         if d2 > self.innovation_gate_chi2:
             return 0.0, 0.0
@@ -964,6 +980,29 @@ class EkfSlam(Node):
             math.hypot(float(delta[0, 0]), float(delta[1, 0])),
             abs(float(delta[2, 0])),
         )
+
+    def publish_innovation(self, update_type: int, innovation: np.ndarray, S: np.ndarray) -> None:
+        if not self.publish_innovations:
+            return
+        if self.innov_pub is None:
+            return
+        if innovation is None or S is None:
+            return
+        if not np.all(np.isfinite(innovation)) or not np.all(np.isfinite(S)):
+            return
+
+        stamp = self.last_update_stamp_sec
+        if stamp is None:
+            stamp = self.get_clock().now().nanoseconds * 1e-9
+
+        dim = int(innovation.size)
+        data = [float(stamp), float(update_type), float(dim)]
+        data.extend([float(v) for v in innovation.reshape(-1)])
+        data.extend([float(v) for v in S.reshape(-1)])
+
+        msg = Float64MultiArray()
+        msg.data = data
+        self.innov_pub.publish(msg)
 
     def augment_landmark(self, zx: float, zy: float, R: np.ndarray) -> None:
         yaw = float(self.x[2, 0])
@@ -1021,6 +1060,17 @@ class EkfSlam(Node):
         odom.pose.pose.orientation.y = qy
         odom.pose.pose.orientation.z = qz
         odom.pose.pose.orientation.w = qw
+        cov = np.zeros((6, 6), dtype=float)
+        cov[0, 0] = float(self.P[0, 0])
+        cov[0, 1] = float(self.P[0, 1])
+        cov[0, 5] = float(self.P[0, 2])
+        cov[1, 0] = float(self.P[1, 0])
+        cov[1, 1] = float(self.P[1, 1])
+        cov[1, 5] = float(self.P[1, 2])
+        cov[5, 0] = float(self.P[2, 0])
+        cov[5, 1] = float(self.P[2, 1])
+        cov[5, 5] = float(self.P[2, 2])
+        odom.pose.covariance = cov.reshape(-1).tolist()
         odom.twist.twist.linear.x = float(self.x[3, 0])
         self.odom_pub.publish(odom)
 

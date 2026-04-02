@@ -7,6 +7,8 @@ import math
 import numpy as np
 from std_msgs.msg import Int16
 from std_msgs.msg import Bool
+import csv
+import os
 
 
 
@@ -55,7 +57,7 @@ class Control(Node):
         # Parameters
         self.declare_parameter("static_lookahead_idx", 6)
         self.declare_parameter("min_speed", 0.5)
-        self.declare_parameter("max_speed", 1.0)
+        self.declare_parameter("max_speed", 0.5)
         self.declare_parameter("Kp_acc", 0.00)
         self.declare_parameter("Ki_acc", 0.00)
         self.declare_parameter("Kd_acc", 0.00)
@@ -64,6 +66,10 @@ class Control(Node):
         # ±60° steering limit, back off at ±59°
         self.declare_parameter("steer_limit_deg", 60.0)
         self.declare_parameter("steer_cap_deg",   59.0)
+        self.declare_parameter("enable_pid_csv", False)
+        self.declare_parameter("pid_csv_path", "~/uh-fs-ai/slam_eval/pid_control.csv")
+        self.declare_parameter("pid_csv_append", False)
+        self.declare_parameter("pid_csv_flush_period_sec", 1.0)
 
         self.min_speed  = self.get_parameter("min_speed").value
         self.max_speed  = self.get_parameter("max_speed").value
@@ -71,6 +77,10 @@ class Control(Node):
         self.speed_timeout_sec = self.get_parameter("speed_timeout_sec").value
         self._steer_lim = self.get_parameter("steer_limit_deg").value
         self._steer_cap = self.get_parameter("steer_cap_deg").value
+        self.enable_pid_csv = bool(self.get_parameter("enable_pid_csv").value)
+        self.pid_csv_path = os.path.expanduser(str(self.get_parameter("pid_csv_path").value))
+        self.pid_csv_append = bool(self.get_parameter("pid_csv_append").value)
+        self.pid_csv_flush_period_sec = float(self.get_parameter("pid_csv_flush_period_sec").value)
 
         self.mission_completed_pub = self.create_publisher(Bool,"/ros_can/mission_completed",1)
         self.driving_flag_pub = self.create_publisher(Bool,"/state_machine/driving_flag",1)
@@ -109,6 +119,12 @@ class Control(Node):
         self.speed_source = "NONE"
         self.turn_memory_active = False
         self.last_pid_out = 0.0
+        self.pid_csv_file = None
+        self.pid_csv_writer = None
+        self.pid_last_flush_time = -1e9
+
+        if self.enable_pid_csv:
+            self.init_pid_csv()
 
 
     def state_callback(self, msg: CarState):
@@ -172,6 +188,7 @@ class Control(Node):
         self.publish_command(accel_cmd, float(self.steer_rad))
         self.publish_visualisation(accel_cmd, raw_deg,self.speed)
         self.publish_static_lookahead_marker(look_wp)
+        self.log_pid_csv(now, dt, raw_deg, pid_out, accel_cmd)
     def can_state_callback(self, msg):
         # self.get_logger().info("---------->  self.as_state:" + str(msg.as_state))
         # self.get_logger().info("---------->  self.ami_state:" + str(msg.ami_state))
@@ -312,6 +329,50 @@ class Control(Node):
         m.color.a = 1.0
         self.index_viz_pub.publish(m)
 
+    def init_pid_csv(self):
+        os.makedirs(os.path.dirname(self.pid_csv_path), exist_ok=True)
+        mode = "a" if self.pid_csv_append else "w"
+        self.pid_csv_file = open(self.pid_csv_path, mode, newline="", encoding="utf-8")
+        self.pid_csv_writer = csv.writer(self.pid_csv_file)
+        if not self.pid_csv_append:
+            self.pid_csv_writer.writerow([
+                "t", "dt", "lookahead_idx",
+                "raw_steer_deg", "steer_rad",
+                "pid_out", "accel_cmd",
+                "speed", "speed_source",
+                "min_speed", "max_speed",
+            ])
+
+    def log_pid_csv(self, now, dt, raw_deg, pid_out, accel_cmd):
+        if not self.enable_pid_csv or self.pid_csv_writer is None:
+            return
+        self.pid_csv_writer.writerow([
+            float(now), float(dt), int(self.get_parameter("static_lookahead_idx").value),
+            float(raw_deg), float(self.steer_rad),
+            float(pid_out), float(accel_cmd),
+            float(self.speed), str(self.speed_source),
+            float(self.min_speed), float(self.max_speed),
+        ])
+        if (now - self.pid_last_flush_time) >= self.pid_csv_flush_period_sec:
+            self.pid_last_flush_time = now
+            try:
+                self.pid_csv_file.flush()
+            except Exception:
+                pass
+
+    def close_pid_csv(self):
+        if self.pid_csv_file is not None:
+            try:
+                self.pid_csv_file.flush()
+            except Exception:
+                pass
+            try:
+                self.pid_csv_file.close()
+            except Exception:
+                pass
+        self.pid_csv_file = None
+        self.pid_csv_writer = None
+
 def main():
     rclpy.init()
     node = Control()
@@ -320,6 +381,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        node.close_pid_csv()
         node.destroy_node()
         rclpy.shutdown()
 
