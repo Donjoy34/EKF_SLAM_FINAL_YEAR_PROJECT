@@ -1,0 +1,8 @@
+.git
+build
+install
+log
+slam_eval
+**/__pycache__
+*.pyc
+uh-fs-ai_bundle.tar.gz

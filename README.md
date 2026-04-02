@@ -22,18 +22,26 @@ $ sudo apt install python3-colcon-common-extensions
 
 ## Clone the repo
 
-Setup ssh-key following the instructions [here](https://gitlab.com/uh4662410/uhra/training/herts-autonomous/-/wikis/ssh-key-setup-and-configure-git) to enable you to authenticate to the GitLab server without using username and password each time.
+Setup ssh-key following the instructions [here](https://gitlab.com/uh4662410/uhra/training/herts-autonomous/-/wikis/ssh-key-setup-and-configure-git) to enable you to authenticates to the GitLab server without using username and password each time.
 
 ```shell
 git clone --recurse-submodules -j8 git@gitlab.com:uh4662410/uhra/uh-fs-ai.git
 ```
 
-**Public GitHub clone (no SSH required)**
+## Offline bundle (zip/tar)
 
+If you received an archive instead of Git, extract it and run from the repo root.
+
+**For .tar.gz bundles**
 ```shell
-git clone --recurse-submodules -j8 https://github.com/Donjoy34/EKF_SLAM_FINAL_YEAR_PROJECT.git
-cd EKF_SLAM_FINAL_YEAR_PROJECT
-git checkout working
+tar -xzf uh-fs-ai_bundle.tar.gz
+cd uh-fs-ai
+```
+
+**For .zip bundles**
+```shell
+unzip uh-fs-ai_bundle.zip
+cd uh-fs-ai
 ```
 
 **Repo root folder name:** `uh-fs-ai`
@@ -42,7 +50,7 @@ git checkout working
 
 execute `pwd` command from your `uh-fs-ai` directory and replace `/path/to/the/directory` in the below command with output of `pwd` command to set the path of this directory as the EUFS_MASTER environment variable 
 
-`Example : echo 'export EUFS_MASTER=/home/nihad/uh-fs-ai' >> ~/.bashrc`
+`Example : echo 'export EUFS_MASTER=/home/don/uh-fs-ai' >> ~/.bashrc`
 
 
 ```shell
@@ -148,3 +156,50 @@ ros2 run control pid_eval --ros-args \
 ### Notes
 - Always re-run `source install/setup.bash` in any new terminal.
 - If you change Python nodes, rebuild: `colcon build --packages-select <pkg>` and re-source.
+
+## Docker (optional)
+
+### Install Docker (Ubuntu 20.04)
+```shell
+sudo apt update
+sudo apt install docker.io
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+```
+Log out and log back in so your user can run Docker without sudo.
+
+### Build the image
+From the repo root (same folder as the Dockerfile):
+```shell
+docker build -t slam_sim .
+```
+
+### Run the image
+```shell
+docker run -it --rm slam_sim
+```
+Inside the container, you can run the same `ros2` commands listed above.
+
+### Run the simulator with Docker (GUI)
+On the host (outside the container):
+```shell
+sudo apt install x11-xserver-utils
+xhost +local:root
+```
+
+Then start the container with X11 support:
+```shell
+docker run -it --rm \
+	--env DISPLAY=$DISPLAY \
+	--env QT_X11_NO_MITSHM=1 \
+	--env LIBGL_ALWAYS_SOFTWARE=1 \
+	--volume /tmp/.X11-unix:/tmp/.X11-unix:rw \
+	slam_sim
+```
+
+Inside the container:
+```shell
+source /opt/ros/galactic/setup.bash
+source /workspace/install/setup.bash
+ros2 launch eufs_launcher eufs_launcher.launch.py
+```
